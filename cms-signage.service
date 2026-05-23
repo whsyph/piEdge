@@ -1,0 +1,13 @@
+[Unit]
+Description=Museum Signage CMS Web App
+After=network.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/museum_signage
+ExecStart=/usr/bin/python3 /home/pi/museum_signage/server.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,16 @@
+[Unit]
+Description=Media Player Otomatis - Layar 2
+After=sound.target network.target labwc.service
+Requires=labwc.service
+
+[Service]
+User=pi
+Type=simple
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=WAYLAND_DISPLAY=wayland-0
+ExecStart=/usr/bin/mpv --vo=gpu --gpu-context=wayland --fs --screen=1 --fs-screen=1 --profile=fast --gpu-dumb-mode=yes --video-sync=desync --loop-playlist=inf --no-audio --no-deinterlace --hwdec=v4l2m2m-copy --input-ipc-server=/tmp/mpv-layar2.sock --playlist=/home/pi/museum_video/layar2/playlist.txt
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

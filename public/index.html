@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="id">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pi Multi Device Video Player Controller</title>
+    <link rel="stylesheet" href="app.css">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap"
+        rel="stylesheet">
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="brand">
+                <div class="brand-logo"></div>
+                <div class="brand-name">
+                    <h1>piEdge CMS</h1>
+                    <span>TEMPE PARK VIDEO PLAYER</span>
+                </div>
+            </div>
+
+            <nav class="nav-menu">
+                <button class="nav-btn active" data-tab="overview">
+                    <span class="icon">📊</span> Overview Grid
+                </button>
+                <button class="nav-btn" data-tab="control">
+                    <span class="icon">📺</span> Layar Kontrol
+                </button>
+                <button class="nav-btn" data-tab="library">
+                    <span class="icon">📁</span> Media Library
+                </button>
+                <button class="nav-btn" data-tab="settings">
+                    <span class="icon">⚙️</span> Pengaturan Pi
+                </button>
+                <button class="nav-btn" data-tab="about">
+                    <span class="icon">ℹ️</span> Tentang Aplikasi
+                </button>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="device-badge">
+                    <span id="active-device-name">Menghubungkan...</span>
+                    <span id="active-device-ip">127.0.0.1</span>
+                </div>
+                <div class="footer-notes">
+                    <div>Version 0.1.0</div>
+                    <div>Developed by imajiwa.lab</div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Workspace -->
+        <main class="main-content">
+            <!-- Header -->
+            <header class="top-header">
+                <div class="header-left">
+                    <div class="status-indicator">
+                        <span id="global-status-dot" class="dot offline"></span>
+                        <span id="global-status-text">Mencari Perangkat...</span>
+                    </div>
+                </div>
+                <div class="header-right">
+                    <div class="switcher-wrapper">
+                        <label for="device-switcher">Pilih Perangkat:</label>
+                        <select id="device-switcher" class="device-select">
+                            <!-- Dynamically populated -->
+                        </select>
+                    </div>
+                    <button id="btn-refresh" class="btn btn-secondary">🔄 Refresh</button>
+                </div>
+            </header>
+
+            <!-- Dashboard Content Panels -->
+            <section class="dashboard-body">
+
+                <!-- TAB 1: OVERVIEW GRID -->
+                <div id="tab-overview" class="tab-panel active">
+                    <div class="section-header">
+                        <h2>Semua Perangkat Layar</h2>
+                        <p>Status real-time dari seluruh Raspberry Pi di museum</p>
+                    </div>
+                    <div id="devices-grid" class="devices-grid">
+                        <!-- Dynamically generated cards -->
+                    </div>
+                </div>
+
+                <!-- TAB 2: LAYAR KONTROL -->
+                <div id="tab-control" class="tab-panel">
+                    <div class="section-header control-header-row">
+                        <div>
+                            <h2>Kontrol Layar Aktif</h2>
+                            <p>Kelola pemutaran video secara real-time pada monitor HDMI</p>
+                        </div>
+                        <div class="toggle-preview-wrapper">
+                            <span class="switch-label">Auto Preview (5s)</span>
+                            <label class="switch">
+                                <input type="checkbox" id="preview-toggle">
+                                <span class="slider round"></span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="screens-row">
+                        <!-- Screen 1 Card -->
+                        <div class="screen-card">
+                            <div class="screen-header-bar">
+                                <h3>Layar 1 (HDMI-A-1)</h3>
+                                <span id="s1-status-badge" class="badge badge-error">Offline</span>
+                            </div>
+
+                            <!-- Live Preview Area -->
+                            <div class="preview-box">
+                                <img id="s1-preview" src="placeholder.jpg" alt="Layar 1 Preview"
+                                    onerror="this.src='placeholder.jpg'">
+                                <button class="btn-preview-refresh" onclick="refreshSingleScreenshot(1)"
+                                    title="Ambil Screenshot Baru">📸 Ambil Preview</button>
+                                <div class="preview-overlay">
+                                    <span id="s1-playing-title" class="playing-title">Tidak ada media</span>
+                                </div>
+                            </div>
+
+                            <!-- Playback Position Progress -->
+                            <div class="progress-container">
+                                <div class="progress-bar-wrapper">
+                                    <div id="s1-progress" class="progress-bar-fill" style="width: 0%"></div>
+                                </div>
+                                <div class="progress-time">
+                                    <span id="s1-time-curr">00:00</span>
+                                    <span id="s1-time-dur">00:00</span>
+                                </div>
+                            </div>
+
+                            <!-- Controls -->
+                            <div class="control-actions">
+                                <div class="playback-controls">
+                                    <button class="btn btn-circle" onclick="controlDevice(1, 'prev')"
+                                        title="Sebelumnya">⏮️</button>
+                                    <button id="s1-btn-play" class="btn btn-circle btn-primary" onclick="togglePlay(1)"
+                                        title="Play/Pause">⏸️</button>
+                                    <button class="btn btn-circle" onclick="controlDevice(1, 'next')"
+                                        title="Selanjutnya">⏭️</button>
+                                </div>
+
+                                <div class="service-controls">
+                                    <h4>Layanan Systemd</h4>
+                                    <div class="btn-group">
+                                        <button class="btn btn-sm btn-success"
+                                            onclick="controlDevice(1, 'start_service')">Start</button>
+                                        <button class="btn btn-sm btn-warning"
+                                            onclick="controlDevice(1, 'restart_service')">Restart</button>
+                                        <button class="btn btn-sm btn-danger"
+                                            onclick="controlDevice(1, 'stop_service')">Stop</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Screen 2 Card -->
+                        <div class="screen-card">
+                            <div class="screen-header-bar">
+                                <h3>Layar 2 (HDMI-A-2)</h3>
+                                <span id="s2-status-badge" class="badge badge-error">Offline</span>
+                            </div>
+
+                            <!-- Live Preview Area -->
+                            <div class="preview-box">
+                                <img id="s2-preview" src="placeholder.jpg" alt="Layar 2 Preview"
+                                    onerror="this.src='placeholder.jpg'">
+                                <button class="btn-preview-refresh" onclick="refreshSingleScreenshot(2)"
+                                    title="Ambil Screenshot Baru">📸 Ambil Preview</button>
+                                <div class="preview-overlay">
+                                    <span id="s2-playing-title" class="playing-title">Tidak ada media</span>
+                                </div>
+                            </div>
+
+                            <!-- Playback Position Progress -->
+                            <div class="progress-container">
+                                <div class="progress-bar-wrapper">
+                                    <div id="s2-progress" class="progress-bar-fill" style="width: 0%"></div>
+                                </div>
+                                <div class="progress-time">
+                                    <span id="s2-time-curr">00:00</span>
+                                    <span id="s2-time-dur">00:00</span>
+                                </div>
+                            </div>
+
+                            <!-- Controls -->
+                            <div class="control-actions">
+                                <div class="playback-controls">
+                                    <button class="btn btn-circle" onclick="controlDevice(2, 'prev')"
+                                        title="Sebelumnya">⏮️</button>
+                                    <button id="s2-btn-play" class="btn btn-circle btn-primary" onclick="togglePlay(2)"
+                                        title="Play/Pause">⏸️</button>
+                                    <button class="btn btn-circle" onclick="controlDevice(2, 'next')"
+                                        title="Selanjutnya">⏭️</button>
+                                </div>
+
+                                <div class="service-controls">
+                                    <h4>Layanan Systemd</h4>
+                                    <div class="btn-group">
+                                        <button class="btn btn-sm btn-success"
+                                            onclick="controlDevice(2, 'start_service')">Start</button>
+                                        <button class="btn btn-sm btn-warning"
+                                            onclick="controlDevice(2, 'restart_service')">Restart</button>
+                                        <button class="btn btn-sm btn-danger"
+                                            onclick="controlDevice(2, 'stop_service')">Stop</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 3: MEDIA LIBRARY -->
+                <div id="tab-library" class="tab-panel">
+                    <div class="section-header">
+                        <h2>Media Library & Playlist Manager</h2>
+                        <p>Upload video baru dan tentukan urutan daftar putar pada tiap layar</p>
+                    </div>
+
+                    <div class="library-container">
+                        <!-- Left Panel: Uploader -->
+                        <div class="library-left-card">
+                            <h3>Upload Video Baru</h3>
+                            <div class="upload-zone" id="drop-zone">
+                                <div class="upload-icon">📤</div>
+                                <p>Drag & drop file video di sini, atau klik untuk memilih</p>
+                                <span class="upload-hint">Format yang didukung: MP4, MKV, AVI, MOV</span>
+                                <input type="file" id="file-input" accept="video/*" style="display: none;">
+                            </div>
+
+                            <div class="form-group margin-top-md">
+                                <label for="upload-target-screen">Tujuan Layar:</label>
+                                <select id="upload-target-screen" class="form-select">
+                                    <option value="1">Layar 1 (HDMI-1)</option>
+                                    <option value="2">Layar 2 (HDMI-2)</option>
+                                </select>
+                            </div>
+
+                            <!-- Upload Progress -->
+                            <div id="upload-progress-wrapper" class="progress-container hidden">
+                                <span id="upload-filename">Nama File.mp4</span>
+                                <div class="progress-bar-wrapper">
+                                    <div id="upload-progress" class="progress-bar-fill" style="width: 0%"></div>
+                                </div>
+                                <div class="progress-time">
+                                    <span id="upload-percent">0%</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Right Panel: Playlists -->
+                        <div class="library-right-card">
+                            <div class="tabs-sub">
+                                <button class="btn btn-secondary active" id="btn-sub-s1"
+                                    onclick="switchLibraryScreen(1)">Layar 1 Playlist</button>
+                                <button class="btn btn-secondary" id="btn-sub-s2" onclick="switchLibraryScreen(2)">Layar
+                                    2 Playlist</button>
+                            </div>
+
+                            <div class="playlist-manager-box">
+                                <div class="playlist-header">
+                                    <h4>Daftar Putar Video</h4>
+                                    <button class="btn btn-sm btn-primary" onclick="savePlaylistOrder()">💾 Simpan
+                                        Urutan</button>
+                                </div>
+                                <p class="help-text">Gunakan tombol 🔼 dan 🔽 untuk mengatur urutan putar video</p>
+                                <ul class="playlist-list" id="playlist-list-items">
+                                    <!-- Dynamic playlist list -->
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 4: PENGATURAN PI -->
+                <div id="tab-settings" class="tab-panel">
+                    <div class="section-header">
+                        <h2>Sistem & Konfigurasi Perangkat</h2>
+                        <p>Kelola alamat IP Raspberry Pi dan lihat diagnosis performa</p>
+                    </div>
+
+                    <div class="settings-row">
+                        <!-- Left Panel: Diagnostics -->
+                        <div class="settings-card">
+                            <h3>Status Diagnostik</h3>
+                            <div class="metrics-grid">
+                                <div class="metric-item">
+                                    <div class="metric-label">Temperatur CPU</div>
+                                    <div class="metric-value" id="diag-temp">0.0°C</div>
+                                    <div class="metric-progress-bar">
+                                        <div id="diag-temp-bar" style="width: 0%"></div>
+                                    </div>
+                                </div>
+                                <div class="metric-item">
+                                    <div class="metric-label">Penggunaan CPU</div>
+                                    <div class="metric-value" id="diag-cpu">0.0%</div>
+                                    <div class="metric-progress-bar">
+                                        <div id="diag-cpu-bar" style="width: 0%"></div>
+                                    </div>
+                                </div>
+                                <div class="metric-item">
+                                    <div class="metric-label">RAM Terpakai</div>
+                                    <div class="metric-value" id="diag-ram">0 / 0 MB (0%)</div>
+                                    <div class="metric-progress-bar">
+                                        <div id="diag-ram-bar" style="width: 0%"></div>
+                                    </div>
+                                </div>
+                                <div class="metric-item">
+                                    <div class="metric-label">Disk Space</div>
+                                    <div class="metric-value" id="diag-disk">0 / 0 GB (0%)</div>
+                                    <div class="metric-progress-bar">
+                                        <div id="diag-disk-bar" style="width: 0%"></div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="diag-meta">
+                                <p><strong>Uptime:</strong> <span id="diag-uptime">-</span></p>
+                                <p><strong>Model:</strong> Raspberry Pi 4 Model B</p>
+                            </div>
+                        </div>
+
+                        <!-- Right Panel: Device List -->
+                        <div class="settings-card">
+                            <h3>Kelola Daftar Perangkat Pi</h3>
+                            <form id="form-add-device" class="device-form">
+                                <div class="form-row">
+                                    <div class="form-group flex-2">
+                                        <label for="new-device-name">Nama Perangkat:</label>
+                                        <input type="text" id="new-device-name" placeholder="mis. Layar Lobby" required>
+                                    </div>
+                                    <div class="form-group flex-2">
+                                        <label for="new-device-ip">Alamat IP / Domain:</label>
+                                        <input type="text" id="new-device-ip" placeholder="mis. 192.168.88.47" required>
+                                    </div>
+                                    <div class="form-group flex-1">
+                                        <label for="new-device-port">Port:</label>
+                                        <input type="number" id="new-device-port" value="8080" required>
+                                    </div>
+                                </div>
+                                <button type="submit" class="btn btn-primary margin-top-sm">➕ Tambah Perangkat</button>
+                            </form>
+
+                            <div class="device-list-box margin-top-md">
+                                <h4>Daftar Perangkat Terdaftar</h4>
+                                <table class="device-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Nama</th>
+                                            <th>IP Address</th>
+                                            <th>Port</th>
+                                            <th>Aksi</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="device-table-body">
+                                        <!-- Dynamically generated rows -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 5: TENTANG APLIKASI -->
+                <div id="tab-about" class="tab-panel">
+                    <div class="section-header">
+                        <h2>Tentang Aplikasi</h2>
+                        <p>Informasi detail mengenai perangkat lunak kontrol pemutar video piEdge</p>
+                    </div>
+
+                    <div class="about-card">
+                        <div class="about-logo-wrapper">
+                            <div class="about-logo"></div>
+                            <h3>piEdge CMS Signage</h3>
+                            <span>Version 0.1.0</span>
+                            <span class="developer-credit">Developed by imajiwa.lab</span>
+                        </div>
+                        
+                        <div class="about-desc">
+                            <p><strong>piEdge CMS Signage</strong> adalah sistem manajemen konten (CMS) signage multimedia berbasis web yang dikembangkan khusus untuk mengelola pemutaran video secara mandiri maupun terpusat pada Raspberry Pi 4.</p>
+                            <p>Software ini mengintegrasikan server web multi-thread berdaya rendah dengan antarmuka pemrograman video MPV melalui soket IPC Unix, memungkinkan kontrol pemutaran video berkinerja tinggi langsung ke port hardware HDMI (HDMI-A-1 dan HDMI-A-2) secara mulus, efisien, dan tanpa hambatan.</p>
+                        </div>
+
+                        <hr class="about-divider">
+
+                        <div class="credits-grid">
+                            <div class="credit-item">
+                                <span class="credit-label">Project Director</span>
+                                <span class="credit-value">Andri Risdianto</span>
+                            </div>
+                            <div class="credit-item">
+                                <span class="credit-label">Lead Designer</span>
+                                <span class="credit-value">Yoga Sadewo</span>
+                            </div>
+                            <div class="credit-item">
+                                <span class="credit-label">UI/UX</span>
+                                <span class="credit-value">Reza Pahlevi</span>
+                            </div>
+                            <div class="credit-item full-width">
+                                <span class="credit-label">Development Team</span>
+                                <span class="credit-value">Arief Hermanto, Arif Rofiudin, Farid Hidayat, Faiz Satrio, Wildan Ferdy.</span>
+                            </div>
+                        </div>
+
+                        <hr class="about-divider">
+
+                        <div class="about-contact">
+                            <h4>Contact Us</h4>
+                            <p><a href="https://imajiwa.id" target="_blank" class="about-link">Imajiwa Kreasi Visual</a></p>
+                            <p><a href="mailto:hello@imajiwa.id" class="about-link">hello@imajiwa.id</a></p>
+                        </div>
+                    </div>
+                </div>
+
+            </section>
+        </main>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast hidden">Notifikasi</div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>

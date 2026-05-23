@@ -1,0 +1,15 @@
+[Unit]
+Description=Media Player Otomatis - Layar Gabungan (Dual Widescreen 2160x1080)
+After=sound.target network.target labwc.service
+Requires=labwc.service
+
+[Service]
+User=pi
+Type=simple
+WorkingDirectory=/home/pi/museum_signage
+ExecStart=/bin/bash /home/pi/museum_signage/start_players.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

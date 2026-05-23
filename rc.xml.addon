@@ -1,0 +1,29 @@
+<!-- Append this block inside the <labwc_config> element (typically under <windowRules>) in ~/.config/labwc/rc.xml -->
+
+<windowRules>
+  <!-- 
+    Layar 1 (Left screen):
+    Positioned at x=0, y=0.
+    Size: 1080 width x 1080 height (or 1920x1080 if using standard 1080p).
+    ToggleDecorations clientstate="off" removes window title bars and borders.
+  -->
+  <windowRule identifier="layar1">
+    <action name="MoveTo" x="0" y="0"/>
+    <action name="ResizeTo" width="1920" height="1080"/>
+    <action name="ToggleDecorations" clientstate="off"/>
+    <action name="Focus"/>
+  </windowRule>
+
+  <!-- 
+    Layar 2 (Right screen):
+    Positioned at x=1920, y=0.
+    Size: 1920 width x 1080 height.
+    ToggleDecorations clientstate="off" removes window title bars and borders.
+  -->
+  <windowRule identifier="layar2">
+    <action name="MoveTo" x="1920" y="0"/>
+    <action name="ResizeTo" width="1920" height="1080"/>
+    <action name="ToggleDecorations" clientstate="off"/>
+    <action name="Focus"/>
+  </windowRule>
+</windowRules>
