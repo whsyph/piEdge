@@ -73,9 +73,8 @@ body {
 .brand-logo {
     width: 32px;
     height: 32px;
-    background: linear-gradient(135deg, var(--primary), var(--success));
+    background: url('logo.png') no-repeat center/contain;
     border-radius: 8px;
-    box-shadow: 0 0 15px var(--primary-glow);
 }
 
 .brand-name h1 {
@@ -1025,9 +1024,8 @@ input:checked + .slider:before {
 .about-logo {
     width: 64px;
     height: 64px;
-    background: linear-gradient(135deg, var(--primary), var(--success));
+    background: url('logo.png') no-repeat center/contain;
     border-radius: 16px;
-    box-shadow: 0 0 25px var(--primary-glow);
 }
 
 .about-logo-wrapper h3 {
