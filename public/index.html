@@ -148,6 +148,17 @@
                                         title="Selanjutnya">⏭️</button>
                                 </div>
 
+                                <div class="audio-controls">
+                                    <h4>Kontrol Audio</h4>
+                                    <div class="audio-controls-row">
+                                        <button id="s1-btn-mute" class="btn btn-sm btn-secondary" onclick="toggleGlobalMute(1)" title="Mute/Unmute">🔇 Muted</button>
+                                        <select id="s1-select-audio-route" class="form-select select-sm" onchange="changeAudioRoute(1)">
+                                            <option value="hdmi">HDMI Output</option>
+                                            <option value="jack">3.5mm Jack Output</option>
+                                        </select>
+                                    </div>
+                                </div>
+
                                 <div class="service-controls">
                                     <h4>Layanan Systemd</h4>
                                     <div class="btn-group">
@@ -200,6 +211,17 @@
                                         title="Play/Pause">⏸️</button>
                                     <button class="btn btn-circle" onclick="controlDevice(2, 'next')"
                                         title="Selanjutnya">⏭️</button>
+                                </div>
+
+                                <div class="audio-controls">
+                                    <h4>Kontrol Audio</h4>
+                                    <div class="audio-controls-row">
+                                        <button id="s2-btn-mute" class="btn btn-sm btn-secondary" onclick="toggleGlobalMute(2)" title="Mute/Unmute">🔇 Muted</button>
+                                        <select id="s2-select-audio-route" class="form-select select-sm" onchange="changeAudioRoute(2)">
+                                            <option value="hdmi">HDMI Output</option>
+                                            <option value="jack">3.5mm Jack Output</option>
+                                        </select>
+                                    </div>
                                 </div>
 
                                 <div class="service-controls">

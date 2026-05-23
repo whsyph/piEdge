@@ -12,7 +12,9 @@ pkill -f "mpv.*layar"
   --vo=dmabuf-wayland \
   --hwdec=v4l2m2m \
   --loop-playlist=inf \
-  --no-audio \
+  --mute=yes \
+  --script-opts=screen=1 \
+  --script=/home/pi/museum_signage/audio_sync.lua \
   --no-deinterlace \
   --input-ipc-server=/tmp/mpv-layar1.sock \
   --playlist=/home/pi/museum_video/layar1/playlist.txt \
@@ -25,7 +27,9 @@ pkill -f "mpv.*layar"
   --vo=dmabuf-wayland \
   --hwdec=v4l2m2m \
   --loop-playlist=inf \
-  --no-audio \
+  --mute=yes \
+  --script-opts=screen=2 \
+  --script=/home/pi/museum_signage/audio_sync.lua \
   --no-deinterlace \
   --input-ipc-server=/tmp/mpv-layar2.sock \
   --playlist=/home/pi/museum_video/layar2/playlist.txt \

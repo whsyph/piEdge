@@ -1,0 +1,12 @@
+{
+  "screen1": {
+    "global_mute": true,
+    "output_device": "hdmi",
+    "clip_settings": {}
+  },
+  "screen2": {
+    "global_mute": true,
+    "output_device": "hdmi",
+    "clip_settings": {}
+  }
+}

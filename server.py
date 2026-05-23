@@ -276,6 +276,10 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
         elif path == '/api/screenshot':
             self.handle_api_screenshot(query)
             return
+            
+        elif path == '/api/audio/config':
+            self.handle_api_audio_config()
+            return
 
         # --- Static Files Router ---
         if path == '/':
@@ -328,6 +332,10 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
             self.handle_api_delete()
         elif path == '/api/playlist/save':
             self.handle_api_playlist_save()
+        elif path == '/api/audio/global':
+            self.handle_api_audio_global()
+        elif path == '/api/audio/clip':
+            self.handle_api_audio_clip()
         else:
             self.send_error(404, "Endpoint Not Found")
 
@@ -363,6 +371,20 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
                     
                     pause_res = send_mpv_command(sock_path, ["get_property", "pause"])
                     paused = pause_res.get("data", False) if pause_res.get("error") == "success" else False
+
+                    # Keep audio device output path in sync
+                    config_path = os.path.join(os.path.dirname(__file__), 'public', 'audio_config.json')
+                    if os.path.exists(config_path):
+                        try:
+                            with open(config_path, 'r', encoding='utf-8') as f:
+                                cfg_data = json.load(f)
+                                scr_cfg = cfg_data.get(f"screen{screen_num}")
+                                if scr_cfg:
+                                    dev = scr_cfg.get("output_device", "hdmi")
+                                    dev_str = 'alsa/plughw:CARD=Headphones,DEV=0' if dev == 'jack' else f'alsa/plughw:CARD=vc4hdmi{screen_num-1},DEV=0'
+                                    send_mpv_command(sock_path, ["set_property", "audio-device", dev_str])
+                        except Exception:
+                            pass
             elif not IS_PI:
                 # Windows Mock
                 mpv_active = True
@@ -412,10 +434,21 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
         screen1 = get_screen_data(1, VIDEO_DIR_1, SOCK_1, "layar-gabungan.service")
         screen2 = get_screen_data(2, VIDEO_DIR_2, SOCK_2, "layar-gabungan.service")
         
+        # Load audio configuration to merge into status payload
+        audio_cfg = {}
+        config_path = os.path.join(os.path.dirname(__file__), 'public', 'audio_config.json')
+        if os.path.exists(config_path):
+            try:
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    audio_cfg = json.load(f)
+            except Exception:
+                pass
+                
         response_data = {
             "system": sys_stats,
             "screen1": screen1,
-            "screen2": screen2
+            "screen2": screen2,
+            "audio": audio_cfg
         }
         
         self.send_response(200)
@@ -621,6 +654,107 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
                     self.wfile.write(f.read())
             else:
                 self.send_error(404, "Preview not available")
+
+    def handle_api_audio_config(self):
+        config_path = os.path.join(os.path.dirname(__file__), 'public', 'audio_config.json')
+        if not os.path.exists(config_path):
+            default_config = {
+                "screen1": {"global_mute": True, "output_device": "hdmi", "clip_settings": {}},
+                "screen2": {"global_mute": True, "output_device": "hdmi", "clip_settings": {}}
+            }
+            with open(config_path, 'w', encoding='utf-8') as f:
+                json.dump(default_config, f, indent=2)
+                
+        with open(config_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_cors_headers()
+        self.end_headers()
+        self.wfile.write(json.dumps(data).encode('utf-8'))
+
+    def handle_api_audio_global(self):
+        content_length = int(self.headers.get('Content-Length', 0))
+        post_data = self.rfile.read(content_length).decode('utf-8')
+        
+        try:
+            params = json.loads(post_data)
+            screen = int(params.get('screen', 1))
+            global_mute = params.get('global_mute', True)
+            output_device = params.get('output_device', 'hdmi')
+            
+            config_path = os.path.join(os.path.dirname(__file__), 'public', 'audio_config.json')
+            with open(config_path, 'r+', encoding='utf-8') as f:
+                data = json.load(f)
+                screen_key = f"screen{screen}"
+                if screen_key in data:
+                    data[screen_key]["global_mute"] = global_mute
+                    data[screen_key]["output_device"] = output_device
+                f.seek(0)
+                json.dump(data, f, indent=2)
+                f.truncate()
+            
+            # Update MPV directly
+            sock_path = SOCK_1 if screen == 1 else SOCK_2
+            send_mpv_command(sock_path, ["set_property", "mute", global_mute])
+            
+            if output_device == 'jack':
+                device_str = 'alsa/plughw:CARD=Headphones,DEV=0'
+            else:
+                device_str = f'alsa/plughw:CARD=vc4hdmi{screen-1},DEV=0'
+            send_mpv_command(sock_path, ["set_property", "audio-device", device_str])
+            
+            res = {"success": True, "message": "Global audio settings updated"}
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_cors_headers()
+            self.end_headers()
+            self.wfile.write(json.dumps(res).encode('utf-8'))
+        except Exception as e:
+            self.send_error(500, f"Error processing global audio: {e}")
+
+    def handle_api_audio_clip(self):
+        content_length = int(self.headers.get('Content-Length', 0))
+        post_data = self.rfile.read(content_length).decode('utf-8')
+        
+        try:
+            params = json.loads(post_data)
+            screen = int(params.get('screen', 1))
+            filename = params.get('filename', '')
+            mute = params.get('mute', False)
+            
+            if not filename:
+                self.send_error(400, "Filename missing")
+                return
+                
+            config_path = os.path.join(os.path.dirname(__file__), 'public', 'audio_config.json')
+            with open(config_path, 'r+', encoding='utf-8') as f:
+                data = json.load(f)
+                screen_key = f"screen{screen}"
+                if screen_key in data:
+                    if "clip_settings" not in data[screen_key]:
+                        data[screen_key]["clip_settings"] = {}
+                    data[screen_key]["clip_settings"][filename] = {"mute": mute}
+                f.seek(0)
+                json.dump(data, f, indent=2)
+                f.truncate()
+                
+            # If currently playing this file, apply mute state
+            sock_path = SOCK_1 if screen == 1 else SOCK_2
+            filename_res = send_mpv_command(sock_path, ["get_property", "filename"])
+            if filename_res.get("error") == "success" and filename_res.get("data") == filename:
+                global_mute = data[screen_key]["global_mute"]
+                send_mpv_command(sock_path, ["set_property", "mute", global_mute or mute])
+                
+            res = {"success": True, "message": "Clip audio setting updated"}
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_cors_headers()
+            self.end_headers()
+            self.wfile.write(json.dumps(res).encode('utf-8'))
+        except Exception as e:
+            self.send_error(500, f"Error processing clip audio: {e}")
 
 
 def run_server(port=8080):

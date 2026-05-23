@@ -7,6 +7,7 @@ let statusInterval = null;
 let screenshotInterval = null;
 let overviewInterval = null;
 let autoPreview = false; // Preview auto-polling flag (disabled by default)
+let audioConfig = {};
 
 // Cache DOM Elements
 const deviceSwitcher = document.getElementById('device-switcher');
@@ -225,8 +226,9 @@ async function fetchActiveDeviceStatus() {
         globalStatusText.textContent = `Online - ${data.system.uptime}`;
         
         // Update screen components
-        updateScreenControlUI(1, data.screen1);
-        updateScreenControlUI(2, data.screen2);
+        audioConfig = data.audio || {};
+        updateScreenControlUI(1, data.screen1, audioConfig.screen1);
+        updateScreenControlUI(2, data.screen2, audioConfig.screen2);
         
         // Update diagnostics tab
         updateDiagnosticsUI(data.system);
@@ -248,13 +250,25 @@ async function fetchActiveDeviceStatus() {
 }
 
 // Update playback details for Screen card
-function updateScreenControlUI(screenNum, data) {
+function updateScreenControlUI(screenNum, data, audioData) {
     const statusBadge = document.getElementById(`s${screenNum}-status-badge`);
     const titleEl = document.getElementById(`s${screenNum}-playing-title`);
     const progressFill = document.getElementById(`s${screenNum}-progress`);
     const timeCurrEl = document.getElementById(`s${screenNum}-time-curr`);
     const timeDurEl = document.getElementById(`s${screenNum}-time-dur`);
     const playBtn = document.getElementById(`s${screenNum}-btn-play`);
+    const muteBtn = document.getElementById(`s${screenNum}-btn-mute`);
+    const routeSelect = document.getElementById(`s${screenNum}-select-audio-route`);
+
+    if (audioData) {
+        const isMuted = audioData.global_mute;
+        muteBtn.textContent = isMuted ? "🔇 Muted" : "🔊 Audio ON";
+        muteBtn.className = isMuted ? "btn btn-sm btn-secondary" : "btn btn-sm btn-primary";
+        if (document.activeElement !== routeSelect) {
+            routeSelect.value = audioData.output_device || "hdmi";
+        }
+    }
+
 
     // Service active status
     if (data.service_active) {
@@ -458,15 +472,25 @@ function updateLibraryPlaylistUI(playlist) {
         return;
     }
 
+    const screenKey = `screen${activeLibraryScreen}`;
+    const clipSettings = (audioConfig[screenKey] && audioConfig[screenKey].clip_settings) || {};
+
     playlist.forEach((item, index) => {
         const li = document.createElement('li');
         li.className = 'playlist-item';
         li.dataset.filename = item.name;
         
+        const isClipMuted = clipSettings[item.name] ? clipSettings[item.name].mute : false;
+        const muteBadgeClass = isClipMuted ? 'badge badge-error' : 'badge badge-success';
+        const muteBadgeText = isClipMuted ? '🔇 Muted' : '🔊 Sound';
+
         li.innerHTML = `
             <div class="item-info">
-                <span class="item-name">${item.name}</span>
-                <span class="item-size">${item.size_mb} MB</span>
+                <div class="item-header-row" style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                    <span class="item-name" style="max-width: 150px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600;">${item.name}</span>
+                    <span class="${muteBadgeClass}" onclick="toggleClipMute('${item.name}')" style="cursor: pointer; font-size: 10px; padding: 2px 6px;" title="Klik untuk ubah status suara">${muteBadgeText}</span>
+                </div>
+                <span class="item-size" style="font-size: 11px; color: var(--text-muted);">${item.size_mb} MB</span>
             </div>
             <div class="item-actions">
                 <button class="btn btn-sm btn-secondary" onclick="movePlaylistItem(${index}, -1)" ${index === 0 ? 'disabled' : ''}>🔼</button>
@@ -713,4 +737,84 @@ function formatTime(seconds) {
     const m = Math.floor(seconds / 60);
     const s = Math.floor(seconds % 60);
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+}
+
+// --- Audio Control Helper APIs ---
+async function toggleGlobalMute(screen) {
+    const screenKey = `screen${screen}`;
+    const currentMute = audioConfig[screenKey] ? audioConfig[screenKey].global_mute : true;
+    const outputDevice = audioConfig[screenKey] ? audioConfig[screenKey].output_device : 'hdmi';
+    
+    try {
+        const url = getApiUrl('/api/audio/global');
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                screen: screen,
+                global_mute: !currentMute,
+                output_device: outputDevice
+            })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Audio Layar ${screen} ${!currentMute ? 'Dimatikan' : 'Dihidupkan'}`);
+            fetchActiveDeviceStatus();
+        }
+    } catch (e) {
+        showToast("Gagal mengubah status audio", true);
+    }
+}
+
+async function changeAudioRoute(screen) {
+    const screenKey = `screen${screen}`;
+    const currentMute = audioConfig[screenKey] ? audioConfig[screenKey].global_mute : true;
+    const routeSelect = document.getElementById(`s${screen}-select-audio-route`);
+    const newRoute = routeSelect.value;
+    
+    try {
+        const url = getApiUrl('/api/audio/global');
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                screen: screen,
+                global_mute: currentMute,
+                output_device: newRoute
+            })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Output Audio Layar ${screen} dialihkan ke ${newRoute.toUpperCase()}`);
+            fetchActiveDeviceStatus();
+        }
+    } catch (e) {
+        showToast("Gagal mengubah rute audio", true);
+    }
+}
+
+async function toggleClipMute(filename) {
+    const screenKey = `screen${activeLibraryScreen}`;
+    const clipSettings = (audioConfig[screenKey] && audioConfig[screenKey].clip_settings) || {};
+    const currentMute = clipSettings[filename] ? clipSettings[filename].mute : false;
+    
+    try {
+        const url = getApiUrl('/api/audio/clip');
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                screen: activeLibraryScreen,
+                filename: filename,
+                mute: !currentMute
+            })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Audio klip "${filename}" ${!currentMute ? 'Dimatikan' : 'Dihidupkan'}`);
+            fetchActiveDeviceStatus();
+        }
+    } catch (e) {
+        showToast("Gagal mengubah status audio klip", true);
+    }
 }
