@@ -19,7 +19,7 @@ pkill -f "mpv.*layar"
   --input-ipc-server=/tmp/mpv-layar1.sock \
   --playlist=/home/pi/museum_video/layar1/playlist.txt \
   --fs \
-  --fs-screen=0 \
+  --fs-screen=1 \
   --title="layar1" \
   --wayland-app-id="layar1" &
 
@@ -34,7 +34,7 @@ pkill -f "mpv.*layar"
   --input-ipc-server=/tmp/mpv-layar2.sock \
   --playlist=/home/pi/museum_video/layar2/playlist.txt \
   --fs \
-  --fs-screen=1 \
+  --fs-screen=0 \
   --title="layar2" \
   --wayland-app-id="layar2" &
 
