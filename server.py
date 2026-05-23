@@ -386,9 +386,9 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
                                     
                                     chan_mode = scr_cfg.get("channel_mode", "stereo")
                                     if chan_mode == "left":
-                                        af_filter = "lavfi=[pan=stereo|c0=c0|c1=0]"
+                                        af_filter = "lavfi=[pan=stereo|c0=c0|c1=0*c1]"
                                     elif chan_mode == "right":
-                                        af_filter = "lavfi=[pan=stereo|c0=0|c1=c1]"
+                                        af_filter = "lavfi=[pan=stereo|c0=0*c0|c1=c1]"
                                     else:
                                         af_filter = ""
                                     send_mpv_command(sock_path, ["set_property", "af", af_filter])
@@ -718,9 +718,9 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
             
             # Sync channel mode (af filter)
             if channel_mode == "left":
-                af_filter = "lavfi=[pan=stereo|c0=c0|c1=0]"
+                af_filter = "lavfi=[pan=stereo|c0=c0|c1=0*c1]"
             elif channel_mode == "right":
-                af_filter = "lavfi=[pan=stereo|c0=0|c1=c1]"
+                af_filter = "lavfi=[pan=stereo|c0=0*c0|c1=c1]"
             else:
                 af_filter = ""
             send_mpv_command(sock_path, ["set_property", "af", af_filter])

@@ -48,9 +48,9 @@ function on_file_loaded()
     local channel_mode = screen_section:match('"channel_mode"%s*:%s*"([^"]+)"') or "stereo"
     local af_filter = ""
     if channel_mode == "left" then
-        af_filter = "lavfi=[pan=stereo|c0=c0|c1=0]"
+        af_filter = "lavfi=[pan=stereo|c0=c0|c1=0*c1]"
     elseif channel_mode == "right" then
-        af_filter = "lavfi=[pan=stereo|c0=0|c1=c1]"
+        af_filter = "lavfi=[pan=stereo|c0=0*c0|c1=c1]"
     end
     mp.set_property("af", af_filter)
     

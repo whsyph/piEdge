@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pi Multi Device Video Player Controller</title>
+    <title>Pi Multi Device Video Player System</title>
     <link rel="icon" type="image/png" href="logo.png">
     <link rel="stylesheet" href="app.css">
     <!-- Google Fonts -->
@@ -21,8 +21,8 @@
             <div class="brand">
                 <div class="brand-logo"></div>
                 <div class="brand-name">
-                    <h1>piEdge CMS</h1>
-                    <span>TEMPE PARK VIDEO PLAYER</span>
+                    <h1>caPiBarra</h1>
+                    <span>Raspberry Pi Video CMS</span>
                 </div>
             </div>
 
@@ -151,12 +151,15 @@
                                 <div class="audio-controls">
                                     <h4>Kontrol Audio</h4>
                                     <div class="audio-controls-row">
-                                        <button id="s1-btn-mute" class="btn btn-sm btn-secondary" onclick="toggleGlobalMute(1)" title="Mute/Unmute">🔇 Muted</button>
-                                        <select id="s1-select-audio-route" class="form-select select-sm" onchange="changeAudioRoute(1)">
+                                        <button id="s1-btn-mute" class="btn btn-sm btn-secondary"
+                                            onclick="toggleGlobalMute(1)" title="Mute/Unmute">🔇 Muted</button>
+                                        <select id="s1-select-audio-route" class="form-select select-sm"
+                                            onchange="changeAudioRoute(1)">
                                             <option value="hdmi">HDMI Output</option>
                                             <option value="jack">3.5mm Jack Output</option>
                                         </select>
-                                        <select id="s1-select-audio-channel" class="form-select select-sm" onchange="changeAudioChannel(1)">
+                                        <select id="s1-select-audio-channel" class="form-select select-sm"
+                                            onchange="changeAudioChannel(1)">
                                             <option value="stereo">Stereo</option>
                                             <option value="left">Channel L (Kiri)</option>
                                             <option value="right">Channel R (Kanan)</option>
@@ -221,12 +224,15 @@
                                 <div class="audio-controls">
                                     <h4>Kontrol Audio</h4>
                                     <div class="audio-controls-row">
-                                        <button id="s2-btn-mute" class="btn btn-sm btn-secondary" onclick="toggleGlobalMute(2)" title="Mute/Unmute">🔇 Muted</button>
-                                        <select id="s2-select-audio-route" class="form-select select-sm" onchange="changeAudioRoute(2)">
+                                        <button id="s2-btn-mute" class="btn btn-sm btn-secondary"
+                                            onclick="toggleGlobalMute(2)" title="Mute/Unmute">🔇 Muted</button>
+                                        <select id="s2-select-audio-route" class="form-select select-sm"
+                                            onchange="changeAudioRoute(2)">
                                             <option value="hdmi">HDMI Output</option>
                                             <option value="jack">3.5mm Jack Output</option>
                                         </select>
-                                        <select id="s2-select-audio-channel" class="form-select select-sm" onchange="changeAudioChannel(2)">
+                                        <select id="s2-select-audio-channel" class="form-select select-sm"
+                                            onchange="changeAudioChannel(2)">
                                             <option value="stereo">Stereo</option>
                                             <option value="left">Channel L (Kiri)</option>
                                             <option value="right">Channel R (Kanan)</option>
@@ -414,10 +420,15 @@
                             <span>Version 0.1.0</span>
                             <span class="developer-credit">Developed by imajiwa.lab</span>
                         </div>
-                        
+
                         <div class="about-desc">
-                            <p><strong>piEdge CMS Signage</strong> adalah sistem manajemen konten (CMS) signage multimedia berbasis web yang dikembangkan khusus untuk mengelola pemutaran video secara mandiri maupun terpusat pada Raspberry Pi 4.</p>
-                            <p>Software ini mengintegrasikan server web multi-thread berdaya rendah dengan antarmuka pemrograman video MPV melalui soket IPC Unix, memungkinkan kontrol pemutaran video berkinerja tinggi langsung ke port hardware HDMI (HDMI-A-1 dan HDMI-A-2) secara mulus, efisien, dan tanpa hambatan.</p>
+                            <p><strong>piEdge CMS Signage</strong> adalah sistem manajemen konten (CMS) signage
+                                multimedia berbasis web yang dikembangkan khusus untuk mengelola pemutaran video secara
+                                mandiri maupun terpusat pada Raspberry Pi 4.</p>
+                            <p>Software ini mengintegrasikan server web multi-thread berdaya rendah dengan antarmuka
+                                pemrograman video MPV melalui soket IPC Unix, memungkinkan kontrol pemutaran video
+                                berkinerja tinggi langsung ke port hardware HDMI (HDMI-A-1 dan HDMI-A-2) secara mulus,
+                                efisien, dan tanpa hambatan.</p>
                         </div>
 
                         <hr class="about-divider">
@@ -437,7 +448,8 @@
                             </div>
                             <div class="credit-item full-width">
                                 <span class="credit-label">Development Team</span>
-                                <span class="credit-value">Arief Hermanto, Arif Rofiudin, Farid Hidayat, Faiz Satrio, Wildan Ferdy.</span>
+                                <span class="credit-value">Arief Hermanto, Arif Rofiudin, Farid Hidayat, Faiz Satrio,
+                                    Wildan Ferdy.</span>
                             </div>
                         </div>
 
@@ -445,7 +457,8 @@
 
                         <div class="about-contact">
                             <h4>Contact Us</h4>
-                            <p><a href="https://imajiwa.id" target="_blank" class="about-link">Imajiwa Kreasi Visual</a></p>
+                            <p><a href="https://imajiwa.id" target="_blank" class="about-link">Imajiwa Kreasi Visual</a>
+                            </p>
                             <p><a href="mailto:hello@imajiwa.id" class="about-link">hello@imajiwa.id</a></p>
                         </div>
                     </div>
