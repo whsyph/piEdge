@@ -259,6 +259,7 @@ function updateScreenControlUI(screenNum, data, audioData) {
     const playBtn = document.getElementById(`s${screenNum}-btn-play`);
     const muteBtn = document.getElementById(`s${screenNum}-btn-mute`);
     const routeSelect = document.getElementById(`s${screenNum}-select-audio-route`);
+    const channelSelect = document.getElementById(`s${screenNum}-select-audio-channel`);
 
     if (audioData) {
         const isMuted = audioData.global_mute;
@@ -266,6 +267,9 @@ function updateScreenControlUI(screenNum, data, audioData) {
         muteBtn.className = isMuted ? "btn btn-sm btn-secondary" : "btn btn-sm btn-primary";
         if (document.activeElement !== routeSelect) {
             routeSelect.value = audioData.output_device || "hdmi";
+        }
+        if (document.activeElement !== channelSelect) {
+            channelSelect.value = audioData.channel_mode || "stereo";
         }
     }
 
@@ -743,7 +747,10 @@ function formatTime(seconds) {
 async function toggleGlobalMute(screen) {
     const screenKey = `screen${screen}`;
     const currentMute = audioConfig[screenKey] ? audioConfig[screenKey].global_mute : true;
-    const outputDevice = audioConfig[screenKey] ? audioConfig[screenKey].output_device : 'hdmi';
+    const routeSelect = document.getElementById(`s${screen}-select-audio-route`);
+    const outputDevice = routeSelect ? routeSelect.value : 'hdmi';
+    const channelSelect = document.getElementById(`s${screen}-select-audio-channel`);
+    const channelMode = channelSelect ? channelSelect.value : 'stereo';
     
     try {
         const url = getApiUrl('/api/audio/global');
@@ -753,7 +760,8 @@ async function toggleGlobalMute(screen) {
             body: JSON.stringify({
                 screen: screen,
                 global_mute: !currentMute,
-                output_device: outputDevice
+                output_device: outputDevice,
+                channel_mode: channelMode
             })
         });
         const data = await res.json();
@@ -771,6 +779,8 @@ async function changeAudioRoute(screen) {
     const currentMute = audioConfig[screenKey] ? audioConfig[screenKey].global_mute : true;
     const routeSelect = document.getElementById(`s${screen}-select-audio-route`);
     const newRoute = routeSelect.value;
+    const channelSelect = document.getElementById(`s${screen}-select-audio-channel`);
+    const channelMode = channelSelect ? channelSelect.value : 'stereo';
     
     try {
         const url = getApiUrl('/api/audio/global');
@@ -780,7 +790,8 @@ async function changeAudioRoute(screen) {
             body: JSON.stringify({
                 screen: screen,
                 global_mute: currentMute,
-                output_device: newRoute
+                output_device: newRoute,
+                channel_mode: channelMode
             })
         });
         const data = await res.json();
@@ -790,6 +801,36 @@ async function changeAudioRoute(screen) {
         }
     } catch (e) {
         showToast("Gagal mengubah rute audio", true);
+    }
+}
+
+async function changeAudioChannel(screen) {
+    const screenKey = `screen${screen}`;
+    const currentMute = audioConfig[screenKey] ? audioConfig[screenKey].global_mute : true;
+    const routeSelect = document.getElementById(`s${screen}-select-audio-route`);
+    const outputDevice = routeSelect ? routeSelect.value : 'hdmi';
+    const channelSelect = document.getElementById(`s${screen}-select-audio-channel`);
+    const newChannel = channelSelect.value;
+    
+    try {
+        const url = getApiUrl('/api/audio/global');
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                screen: screen,
+                global_mute: currentMute,
+                output_device: outputDevice,
+                channel_mode: newChannel
+            })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Channel Audio Layar ${screen} diubah ke ${newChannel.toUpperCase()}`);
+            fetchActiveDeviceStatus();
+        }
+    } catch (e) {
+        showToast("Gagal mengubah channel audio", true);
     }
 }
 

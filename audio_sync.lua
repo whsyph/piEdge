@@ -44,13 +44,23 @@ function on_file_loaded()
         clip_mute = clip_match:match('"mute"%s*:%s*(%a+)') == "true"
     end
     
+    -- Check channel mode setting and apply panning filters
+    local channel_mode = screen_section:match('"channel_mode"%s*:%s*"([^"]+)"') or "stereo"
+    local af_filter = ""
+    if channel_mode == "left" then
+        af_filter = "lavfi=[pan=stereo|c0=c0|c1=0]"
+    elseif channel_mode == "right" then
+        af_filter = "lavfi=[pan=stereo|c0=0|c1=c1]"
+    end
+    mp.set_property("af", af_filter)
+    
     -- Apply final mute state to player
     local final_mute = global_mute or clip_mute
     mp.set_property_bool("mute", final_mute)
     
     mp.msg.info(string.format(
-        "File: %s | Screen: %s | Global Mute: %s | Clip Mute: %s | Final: %s",
-        filename, screen, tostring(global_mute), tostring(clip_mute), tostring(final_mute)
+        "File: %s | Screen: %s | Global Mute: %s | Clip Mute: %s | Channel Mode: %s | Final: %s",
+        filename, screen, tostring(global_mute), tostring(clip_mute), channel_mode, tostring(final_mute)
     ))
 end
 

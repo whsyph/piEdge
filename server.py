@@ -372,7 +372,7 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
                     pause_res = send_mpv_command(sock_path, ["get_property", "pause"])
                     paused = pause_res.get("data", False) if pause_res.get("error") == "success" else False
 
-                    # Keep audio device output path in sync
+                    # Keep audio device output path and channel mode in sync
                     config_path = os.path.join(os.path.dirname(__file__), 'public', 'audio_config.json')
                     if os.path.exists(config_path):
                         try:
@@ -383,6 +383,15 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
                                     dev = scr_cfg.get("output_device", "hdmi")
                                     dev_str = 'alsa/plughw:CARD=Headphones,DEV=0' if dev == 'jack' else f'alsa/plughw:CARD=vc4hdmi{screen_num-1},DEV=0'
                                     send_mpv_command(sock_path, ["set_property", "audio-device", dev_str])
+                                    
+                                    chan_mode = scr_cfg.get("channel_mode", "stereo")
+                                    if chan_mode == "left":
+                                        af_filter = "lavfi=[pan=stereo|c0=c0|c1=0]"
+                                    elif chan_mode == "right":
+                                        af_filter = "lavfi=[pan=stereo|c0=0|c1=c1]"
+                                    else:
+                                        af_filter = ""
+                                    send_mpv_command(sock_path, ["set_property", "af", af_filter])
                         except Exception:
                             pass
             elif not IS_PI:
@@ -659,8 +668,8 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
         config_path = os.path.join(os.path.dirname(__file__), 'public', 'audio_config.json')
         if not os.path.exists(config_path):
             default_config = {
-                "screen1": {"global_mute": True, "output_device": "hdmi", "clip_settings": {}},
-                "screen2": {"global_mute": True, "output_device": "hdmi", "clip_settings": {}}
+                "screen1": {"global_mute": True, "output_device": "hdmi", "channel_mode": "stereo", "clip_settings": {}},
+                "screen2": {"global_mute": True, "output_device": "hdmi", "channel_mode": "stereo", "clip_settings": {}}
             }
             with open(config_path, 'w', encoding='utf-8') as f:
                 json.dump(default_config, f, indent=2)
@@ -683,6 +692,7 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
             screen = int(params.get('screen', 1))
             global_mute = params.get('global_mute', True)
             output_device = params.get('output_device', 'hdmi')
+            channel_mode = params.get('channel_mode', 'stereo')
             
             config_path = os.path.join(os.path.dirname(__file__), 'public', 'audio_config.json')
             with open(config_path, 'r+', encoding='utf-8') as f:
@@ -691,6 +701,7 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
                 if screen_key in data:
                     data[screen_key]["global_mute"] = global_mute
                     data[screen_key]["output_device"] = output_device
+                    data[screen_key]["channel_mode"] = channel_mode
                 f.seek(0)
                 json.dump(data, f, indent=2)
                 f.truncate()
@@ -704,6 +715,15 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
             else:
                 device_str = f'alsa/plughw:CARD=vc4hdmi{screen-1},DEV=0'
             send_mpv_command(sock_path, ["set_property", "audio-device", device_str])
+            
+            # Sync channel mode (af filter)
+            if channel_mode == "left":
+                af_filter = "lavfi=[pan=stereo|c0=c0|c1=0]"
+            elif channel_mode == "right":
+                af_filter = "lavfi=[pan=stereo|c0=0|c1=c1]"
+            else:
+                af_filter = ""
+            send_mpv_command(sock_path, ["set_property", "af", af_filter])
             
             res = {"success": True, "message": "Global audio settings updated"}
             self.send_response(200)

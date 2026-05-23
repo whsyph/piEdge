@@ -2,11 +2,13 @@
   "screen1": {
     "global_mute": true,
     "output_device": "hdmi",
+    "channel_mode": "stereo",
     "clip_settings": {}
   },
   "screen2": {
     "global_mute": true,
     "output_device": "hdmi",
+    "channel_mode": "stereo",
     "clip_settings": {}
   }
 }
