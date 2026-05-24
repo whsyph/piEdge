@@ -141,9 +141,9 @@ def check_schedules():
                     if event.get("type") == "power":
                         action = event.get("action")
                         if action == "sleep":
-                            if IS_PI: subprocess.run("vcgencmd display_power 0", shell=True)
+                            if IS_PI: subprocess.run("sudo -u pi XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 wlr-randr --output HDMI-A-1 --off --output HDMI-A-2 --off", shell=True)
                         elif action == "wake":
-                            if IS_PI: subprocess.run("vcgencmd display_power 1", shell=True)
+                            if IS_PI: subprocess.run("sudo -u pi XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 wlr-randr --output HDMI-A-1 --on --output HDMI-A-2 --on", shell=True)
                                 
                     elif event.get("type") == "playlist":
                         screen = int(event.get("screen", 1))
