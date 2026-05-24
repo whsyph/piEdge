@@ -39,6 +39,9 @@
                 <button class="nav-btn" data-tab="settings" data-i18n="nav_settings">
                     <span class="icon">⚙️</span> Pengaturan Pi
                 </button>
+                <button class="nav-btn" data-tab="schedule" data-i18n="nav_schedule">
+                    <span class="icon">📅</span> Penjadwalan
+                </button>
                 <button class="nav-btn" data-tab="config" data-i18n="nav_config">
                     <span class="icon">🎨</span> Tampilan & Bahasa
                 </button>
@@ -309,17 +312,26 @@
                         <div class="library-right-card">
                             <div class="tabs-sub">
                                 <button class="btn btn-secondary active" id="btn-sub-s1"
-                                    onclick="switchLibraryScreen(1)" data-i18n="playlist_tab_1">Layar 1 Playlist</button>
+                                    onclick="switchLibraryScreen(1)" data-i18n="playlist_tab_1">Layar 1</button>
                                 <button class="btn btn-secondary" id="btn-sub-s2" onclick="switchLibraryScreen(2)"
-                                    data-i18n="playlist_tab_2">Layar 2 Playlist</button>
+                                    data-i18n="playlist_tab_2">Layar 2</button>
                             </div>
 
                             <div class="playlist-manager-box">
-                                <div class="playlist-header">
-                                    <h4 data-i18n="playlist_title">Daftar Putar Video</h4>
-                                    <button class="btn btn-sm btn-primary" onclick="savePlaylistOrder()" data-i18n="btn_save_order">💾 Simpan Urutan</button>
+                                <div class="playlist-header" style="flex-direction: column; align-items: stretch; gap: 10px;">
+                                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                                        <h4 data-i18n="playlist_title">Daftar Putar Video</h4>
+                                        <button class="btn btn-sm btn-primary" onclick="savePlaylistOrder()" data-i18n="btn_save_order">💾 Simpan</button>
+                                    </div>
+                                    <div style="display: flex; gap: 10px; align-items: center;">
+                                        <label for="select-playlist" data-i18n="select_playlist_label">Pilih Playlist:</label>
+                                        <select id="select-playlist" class="form-select" onchange="changePlaylist()" style="flex: 1;">
+                                            <option value="Default">Default</option>
+                                        </select>
+                                        <button class="btn btn-sm btn-secondary" onclick="createNewPlaylist()" title="Buat Playlist Baru">➕</button>
+                                    </div>
                                 </div>
-                                <p class="help-text" data-i18n="playlist_sub">Gunakan tombol 🔼 dan 🔽 untuk mengatur urutan putar video</p>
+                                <p class="help-text" data-i18n="playlist_sub" style="margin-top: 10px;">Gunakan tombol 🔼 dan 🔽 untuk mengatur urutan putar video. Centang video untuk memasukkannya ke playlist ini.</p>
                                 <ul class="playlist-list" id="playlist-list-items">
                                     <!-- Dynamic playlist list -->
                                 </ul>
@@ -441,6 +453,47 @@
                     </div>
                 </div>
 
+                <!-- TAB: PENJADWALAN -->
+                <div id="tab-schedule" class="tab-panel">
+                    <div class="section-header" style="display: flex; justify-content: space-between; align-items: flex-start;">
+                        <div>
+                            <h2 data-i18n="schedule_header">Jadwal Operasional</h2>
+                            <p data-i18n="schedule_sub">Atur jam hidup/mati otomatis dan jadwal pergantian playlist layar</p>
+                        </div>
+                        <button class="btn btn-primary" onclick="openScheduleModal()" data-i18n="btn_add_schedule">➕ Tambah Jadwal</button>
+                    </div>
+
+                    <div class="schedule-card">
+                        <div class="form-group" style="max-width: 300px; margin-bottom: 20px;">
+                            <label for="tz-select" data-i18n="tz_select_label">Timezone (GMT Offset):</label>
+                            <select id="tz-select" class="form-select" onchange="saveTimezone()">
+                                <option value="7">UTC+7 (WIB / Jakarta)</option>
+                                <option value="8">UTC+8 (WITA / Bali)</option>
+                                <option value="9">UTC+9 (WIT / Jayapura)</option>
+                                <option value="0">UTC+0 (GMT / London)</option>
+                            </select>
+                        </div>
+
+                        <div class="device-list-box">
+                            <table class="device-table">
+                                <thead>
+                                    <tr>
+                                        <th data-i18n="th_time">Waktu</th>
+                                        <th data-i18n="th_days">Hari</th>
+                                        <th data-i18n="th_type">Aksi</th>
+                                        <th data-i18n="th_target">Target</th>
+                                        <th data-i18n="th_status">Status</th>
+                                        <th data-i18n="th_action">Hapus</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="schedule-table-body">
+                                    <!-- Dynamic rows -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- TAB 6: TENTANG APLIKASI -->
                 <div id="tab-about" class="tab-panel">
                     <div class="section-header">
@@ -505,6 +558,64 @@
 
     <!-- Toast Notification -->
     <div id="toast" class="toast hidden">Notifikasi</div>
+
+    <!-- Schedule Modal -->
+    <div id="schedule-modal" class="modal hidden">
+        <div class="modal-content">
+            <h3 data-i18n="modal_schedule_title">Tambah Jadwal Baru</h3>
+            <div class="form-group margin-top-md">
+                <label data-i18n="sch_type">Tipe Jadwal:</label>
+                <select id="sch-type" class="form-select" onchange="toggleScheduleForm()">
+                    <option value="power" data-i18n="sch_type_power">Power (Sleep/Wake Layar)</option>
+                    <option value="playlist" data-i18n="sch_type_playlist">Putar Playlist Video</option>
+                </select>
+            </div>
+            
+            <div id="sch-power-fields" class="form-group margin-top-sm">
+                <label data-i18n="sch_power_action">Aksi Power:</label>
+                <select id="sch-power-action" class="form-select">
+                    <option value="sleep" data-i18n="sch_act_sleep">Standby / Matikan TV (Sleep)</option>
+                    <option value="wake" data-i18n="sch_act_wake">Nyalakan TV (Wake)</option>
+                </select>
+            </div>
+
+            <div id="sch-playlist-fields" class="form-group margin-top-sm hidden">
+                <label data-i18n="sch_screen_target">Layar Target:</label>
+                <select id="sch-screen" class="form-select">
+                    <option value="1">Layar 1</option>
+                    <option value="2">Layar 2</option>
+                </select>
+                <label class="margin-top-sm" data-i18n="sch_playlist_name">Nama Playlist:</label>
+                <select id="sch-playlist-name" class="form-select">
+                    <option value="Default">Default</option>
+                    <!-- Will be populated dynamically -->
+                </select>
+            </div>
+
+            <div class="form-group margin-top-sm">
+                <label data-i18n="sch_time">Waktu (HH:MM):</label>
+                <input type="time" id="sch-time" class="form-input" required>
+            </div>
+
+            <div class="form-group margin-top-sm">
+                <label data-i18n="sch_days">Hari Pelaksanaan:</label>
+                <div class="checkbox-group" id="sch-days">
+                    <label><input type="checkbox" value="Mon" checked> Sen</label>
+                    <label><input type="checkbox" value="Tue" checked> Sel</label>
+                    <label><input type="checkbox" value="Wed" checked> Rab</label>
+                    <label><input type="checkbox" value="Thu" checked> Kam</label>
+                    <label><input type="checkbox" value="Fri" checked> Jum</label>
+                    <label><input type="checkbox" value="Sat" checked> Sab</label>
+                    <label><input type="checkbox" value="Sun" checked> Min</label>
+                </div>
+            </div>
+
+            <div class="modal-actions margin-top-md">
+                <button class="btn btn-secondary" onclick="closeScheduleModal()" data-i18n="btn_cancel">Batal</button>
+                <button class="btn btn-primary" onclick="saveNewSchedule()" data-i18n="btn_save">Simpan Jadwal</button>
+            </div>
+        </div>
+    </div>
 
     <script src="app.js"></script>
 </body>

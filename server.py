@@ -7,6 +7,8 @@ import shutil
 import urllib.parse
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 import time
+import threading
+from datetime import datetime, timezone, timedelta
 
 # Directory settings
 if os.path.exists('/home/pi'):
@@ -23,9 +25,28 @@ else:
     SOCK_2 = '\\\\.\\pipe\\mpv-layar2'
     IS_PI = False
 
+SCHEDULES_FILE = os.path.join(os.path.dirname(__file__), 'public', 'schedules.json')
+PLAYLISTS_FILE = os.path.join(os.path.dirname(__file__), 'public', 'playlists.json')
+
 # Ensure video directories exist
 os.makedirs(VIDEO_DIR_1, exist_ok=True)
 os.makedirs(VIDEO_DIR_2, exist_ok=True)
+
+def init_json_files():
+    if not os.path.exists(SCHEDULES_FILE):
+        default_schedules = {"timezone_offset": 7, "events": []}
+        with open(SCHEDULES_FILE, 'w', encoding='utf-8') as f:
+            json.dump(default_schedules, f, indent=2)
+            
+    if not os.path.exists(PLAYLISTS_FILE):
+        default_playlists = {
+            "screen1": {"Default": []},
+            "screen2": {"Default": []}
+        }
+        with open(PLAYLISTS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(default_playlists, f, indent=2)
+
+init_json_files()
 
 # Generate default playlist if it doesn't exist
 def init_playlist_file(video_dir):
@@ -84,6 +105,78 @@ def send_mpv_command(sock_path, command_args):
         return {"error": "No response"}
     except Exception as e:
         return {"error": str(e)}
+
+# --- Background Schedule Worker ---
+def check_schedules():
+    while True:
+        try:
+            with open(SCHEDULES_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                
+            tz_offset = data.get("timezone_offset", 7)
+            tz = timezone(timedelta(hours=tz_offset))
+            now = datetime.now(tz)
+            
+            curr_time = now.strftime("%H:%M")
+            # Convert python day string to matching short English name used in UI (e.g. 'Mon')
+            curr_day = now.strftime("%a")
+            
+            for event in data.get("events", []):
+                if not event.get("enabled", True):
+                    continue
+                    
+                if event.get("time") == curr_time and curr_day in event.get("days", []):
+                    last_triggered = event.get("_last_triggered", "")
+                    # Prevent re-triggering in the same minute
+                    if last_triggered == now.strftime("%Y-%m-%d %H:%M"):
+                        continue
+                        
+                    event["_last_triggered"] = now.strftime("%Y-%m-%d %H:%M")
+                    print(f"[Schedule] Triggering Event {event.get('id')} - {event.get('type')}")
+                    
+                    if event.get("type") == "power":
+                        action = event.get("action")
+                        if action == "sleep":
+                            if IS_PI: subprocess.run("vcgencmd display_power 0", shell=True)
+                        elif action == "wake":
+                            if IS_PI: subprocess.run("vcgencmd display_power 1", shell=True)
+                                
+                    elif event.get("type") == "playlist":
+                        screen = int(event.get("screen", 1))
+                        playlist_name = event.get("playlist_name", "Default")
+                        
+                        try:
+                            with open(PLAYLISTS_FILE, 'r', encoding='utf-8') as pf:
+                                pl_data = json.load(pf)
+                            screen_key = f"screen{screen}"
+                            files = pl_data.get(screen_key, {}).get(playlist_name, [])
+                            
+                            upload_dir = VIDEO_DIR_1 if screen == 1 else VIDEO_DIR_2
+                            playlist_path = os.path.join(upload_dir, 'playlist.txt')
+                            
+                            with open(playlist_path, 'w', encoding='utf-8') as pt:
+                                for fname in files:
+                                    f_path = os.path.join(upload_dir, fname)
+                                    if os.path.exists(f_path):
+                                        pt.write(f_path + '\n')
+                                        
+                            sock_path = SOCK_1 if screen == 1 else SOCK_2
+                            if IS_PI and os.path.exists(sock_path):
+                                send_mpv_command(sock_path, ["loadlist", playlist_path])
+                                
+                        except Exception as e:
+                            print(f"[Schedule] Playlist error: {e}")
+                            
+            with open(SCHEDULES_FILE, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2)
+                
+        except Exception as e:
+            pass # Suppress file read/write errors if they occur concurrently
+            
+        time.sleep(30)
+
+schedule_thread = threading.Thread(target=check_schedules, daemon=True)
+schedule_thread.start()
 
 
 # --- System resource metrics (Linux/Pi) ---
@@ -280,6 +373,14 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
         elif path == '/api/audio/config':
             self.handle_api_audio_config()
             return
+            
+        elif path == '/api/schedule/config':
+            self.handle_api_schedule_config()
+            return
+            
+        elif path == '/api/playlists/list':
+            self.handle_api_playlists_list()
+            return
 
         # --- Static Files Router ---
         if path == '/':
@@ -336,6 +437,10 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
             self.handle_api_audio_global()
         elif path == '/api/audio/clip':
             self.handle_api_audio_clip()
+        elif path == '/api/schedule/save':
+            self.handle_api_schedule_save()
+        elif path == '/api/playlists/save_all':
+            self.handle_api_playlists_save_all()
         else:
             self.send_error(404, "Endpoint Not Found")
 
@@ -437,7 +542,8 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
                 "time_pos": time_pos,
                 "duration": duration,
                 "paused": paused,
-                "playlist": files_data
+                "playlist": files_data,
+                "all_files": all_files
             }
 
         screen1 = get_screen_data(1, VIDEO_DIR_1, SOCK_1, "layar-gabungan.service")
@@ -775,6 +881,65 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(res).encode('utf-8'))
         except Exception as e:
             self.send_error(500, f"Error processing clip audio: {e}")
+
+    def handle_api_schedule_config(self):
+        try:
+            with open(SCHEDULES_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_cors_headers()
+            self.end_headers()
+            self.wfile.write(json.dumps(data).encode('utf-8'))
+        except Exception as e:
+            self.send_error(500, str(e))
+            
+    def handle_api_schedule_save(self):
+        content_length = int(self.headers.get('Content-Length', 0))
+        post_data = self.rfile.read(content_length).decode('utf-8')
+        try:
+            params = json.loads(post_data)
+            # Basic conflict checking can be done here or in UI. We'll rely on UI for now or just save it.
+            with open(SCHEDULES_FILE, 'w', encoding='utf-8') as f:
+                json.dump(params, f, indent=2)
+            
+            res = {"success": True, "message": "Schedule saved"}
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_cors_headers()
+            self.end_headers()
+            self.wfile.write(json.dumps(res).encode('utf-8'))
+        except Exception as e:
+            self.send_error(500, str(e))
+            
+    def handle_api_playlists_list(self):
+        try:
+            with open(PLAYLISTS_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_cors_headers()
+            self.end_headers()
+            self.wfile.write(json.dumps(data).encode('utf-8'))
+        except Exception as e:
+            self.send_error(500, str(e))
+            
+    def handle_api_playlists_save_all(self):
+        content_length = int(self.headers.get('Content-Length', 0))
+        post_data = self.rfile.read(content_length).decode('utf-8')
+        try:
+            params = json.loads(post_data)
+            with open(PLAYLISTS_FILE, 'w', encoding='utf-8') as f:
+                json.dump(params, f, indent=2)
+                
+            res = {"success": True, "message": "Playlists saved"}
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_cors_headers()
+            self.end_headers()
+            self.wfile.write(json.dumps(res).encode('utf-8'))
+        except Exception as e:
+            self.send_error(500, str(e))
 
 
 def run_server(port=8080):

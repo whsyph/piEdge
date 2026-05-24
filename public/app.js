@@ -121,7 +121,34 @@ const i18n = {
         config_header: "Konfigurasi Tampilan & Bahasa",
         config_sub: "Sesuaikan tema warna preset dan bahasa antarmuka aplikasi",
         theme_select_label: "Preset Warna (Skin):",
-        lang_select_label: "Bahasa Antarmuka (Language):"
+        lang_select_label: "Bahasa Antarmuka (Language):",
+        nav_schedule: "📅 Penjadwalan",
+        schedule_header: "Jadwal Operasional",
+        schedule_sub: "Atur jam hidup/mati otomatis dan jadwal pergantian playlist layar",
+        btn_add_schedule: "➕ Tambah Jadwal",
+        tz_select_label: "Timezone (GMT Offset):",
+        th_time: "Waktu",
+        th_days: "Hari",
+        th_type: "Aksi",
+        th_target: "Target",
+        th_status: "Status",
+        th_action: "Hapus",
+        modal_schedule_title: "Tambah Jadwal Baru",
+        sch_type: "Tipe Jadwal:",
+        sch_type_power: "Power (Sleep/Wake Layar)",
+        sch_type_playlist: "Putar Playlist Video",
+        sch_power_action: "Aksi Power:",
+        sch_act_sleep: "Standby / Matikan TV (Sleep)",
+        sch_act_wake: "Nyalakan TV (Wake)",
+        sch_screen_target: "Layar Target:",
+        sch_playlist_name: "Nama Playlist:",
+        sch_time: "Waktu (HH:MM):",
+        sch_days: "Hari Pelaksanaan:",
+        btn_cancel: "Batal",
+        btn_save: "Simpan Jadwal",
+        select_playlist_label: "Pilih Playlist:",
+        toast_conflict: "Konflik: Jadwal sudah ada di waktu tersebut!",
+        confirm_delete_schedule: "Hapus jadwal ini?"
     },
     en: {
         brand_name: "caPiBarra",
@@ -244,7 +271,34 @@ const i18n = {
         config_header: "UI & Language Configuration",
         config_sub: "Customize color theme presets and interface language",
         theme_select_label: "Color Preset (Skin):",
-        lang_select_label: "Interface Language:"
+        lang_select_label: "Interface Language:",
+        nav_schedule: "📅 Scheduling",
+        schedule_header: "Operational Schedule",
+        schedule_sub: "Configure automatic power on/off and screen playlist changes",
+        btn_add_schedule: "➕ Add Schedule",
+        tz_select_label: "Timezone (GMT Offset):",
+        th_time: "Time",
+        th_days: "Days",
+        th_type: "Action",
+        th_target: "Target",
+        th_status: "Status",
+        th_action: "Delete",
+        modal_schedule_title: "Add New Schedule",
+        sch_type: "Schedule Type:",
+        sch_type_power: "Power (Sleep/Wake Screen)",
+        sch_type_playlist: "Play Video Playlist",
+        sch_power_action: "Power Action:",
+        sch_act_sleep: "Standby / Turn Off TV (Sleep)",
+        sch_act_wake: "Turn On TV (Wake)",
+        sch_screen_target: "Target Screen:",
+        sch_playlist_name: "Playlist Name:",
+        sch_time: "Time (HH:MM):",
+        sch_days: "Execution Days:",
+        btn_cancel: "Cancel",
+        btn_save: "Save Schedule",
+        select_playlist_label: "Select Playlist:",
+        toast_conflict: "Conflict: A schedule already exists at this time!",
+        confirm_delete_schedule: "Delete this schedule?"
     }
 };
 
@@ -535,8 +589,8 @@ async function fetchActiveDeviceStatus() {
         // Update diagnostics tab
         updateDiagnosticsUI(data.system);
         
-        // If library tab is visible, update playlist
-        updateLibraryPlaylistUI(activeLibraryScreen === 1 ? data.screen1.playlist : data.screen2.playlist);
+        // If library tab is visible, update playlist with all files
+        updateLibraryPlaylistUI(activeLibraryScreen === 1 ? data.screen1.all_files : data.screen2.all_files);
 
     } catch (e) {
         console.error("Gagal kontak ke device active status:", e);
@@ -769,39 +823,63 @@ function switchLibraryScreen(screen) {
     fetchActiveDeviceStatus();
 }
 
-function updateLibraryPlaylistUI(playlist) {
+function updateLibraryPlaylistUI(allFiles) {
     const listEl = document.getElementById('playlist-list-items');
     listEl.innerHTML = '';
 
-    if (!playlist || playlist.length === 0) {
+    if (!allFiles || allFiles.length === 0) {
         listEl.innerHTML = '<li class="playlist-item text-muted">Folder media kosong. Silakan unggah file video.</li>';
         return;
     }
 
     const screenKey = `screen${activeLibraryScreen}`;
     const clipSettings = (audioConfig[screenKey] && audioConfig[screenKey].clip_settings) || {};
+    
+    // Get the playlist arrays from our new multi-playlist system
+    const screenPlaylists = playlistsData[screenKey] || { "Default": [] };
+    const currentPlaylistFiles = screenPlaylists[currentSelectedPlaylist] || [];
 
-    playlist.forEach((item, index) => {
+    // Combine current playlist items with unselected ones at the bottom
+    let orderedFiles = [];
+    currentPlaylistFiles.forEach(fname => {
+        const found = allFiles.find(f => f === fname || f.name === fname);
+        if (found) orderedFiles.push(found);
+    });
+    allFiles.forEach(f => {
+        const fname = typeof f === 'string' ? f : f.name;
+        if (!currentPlaylistFiles.includes(fname)) {
+            orderedFiles.push(f);
+        }
+    });
+
+    orderedFiles.forEach((item, index) => {
+        const fname = typeof item === 'string' ? item : item.name;
+        const sizeMb = typeof item === 'string' ? '' : item.size_mb;
+        const isSelected = currentPlaylistFiles.includes(fname);
+        
         const li = document.createElement('li');
         li.className = 'playlist-item';
-        li.dataset.filename = item.name;
+        li.dataset.filename = fname;
         
-        const isClipMuted = clipSettings[item.name] ? clipSettings[item.name].mute : false;
+        const isClipMuted = clipSettings[fname] ? clipSettings[fname].mute : false;
         const muteBadgeClass = isClipMuted ? 'badge badge-error' : 'badge badge-success';
         const muteBadgeText = isClipMuted ? '🔇 Muted' : '🔊 Sound';
 
         li.innerHTML = `
-            <div class="item-info">
-                <div class="item-header-row" style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
-                    <span class="item-name" style="max-width: 150px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600;">${item.name}</span>
-                    <span class="${muteBadgeClass}" onclick="toggleClipMute('${item.name}')" style="cursor: pointer; font-size: 10px; padding: 2px 6px;" title="Klik untuk ubah status suara">${muteBadgeText}</span>
+            <div style="display: flex; align-items: center; gap: 12px; max-width: 65%;">
+                <input type="checkbox" class="playlist-checkbox" ${isSelected ? 'checked' : ''} style="cursor:pointer;" title="Sertakan ke playlist ini">
+                <div class="item-info" style="max-width: 100%;">
+                    <div class="item-header-row" style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                        <span class="item-name" style="max-width: 150px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600;">${fname}</span>
+                        <span class="${muteBadgeClass}" onclick="toggleClipMute('${fname}')" style="cursor: pointer; font-size: 10px; padding: 2px 6px;" title="Klik untuk ubah status suara">${muteBadgeText}</span>
+                    </div>
+                    <span class="item-size" style="font-size: 11px; color: var(--text-muted);">${sizeMb ? sizeMb + ' MB' : ''}</span>
                 </div>
-                <span class="item-size" style="font-size: 11px; color: var(--text-muted);">${item.size_mb} MB</span>
             </div>
             <div class="item-actions">
                 <button class="btn btn-sm btn-secondary" onclick="movePlaylistItem(${index}, -1)" ${index === 0 ? 'disabled' : ''}>🔼</button>
-                <button class="btn btn-sm btn-secondary" onclick="movePlaylistItem(${index}, 1)" ${index === playlist.length - 1 ? 'disabled' : ''}>🔽</button>
-                <button class="btn btn-sm btn-danger" onclick="deleteVideoFile('${item.name}')">🗑️</button>
+                <button class="btn btn-sm btn-secondary" onclick="movePlaylistItem(${index}, 1)" ${index === orderedFiles.length - 1 ? 'disabled' : ''}>🔽</button>
+                <button class="btn btn-sm btn-danger" onclick="deleteVideoFile('${fname}')">🗑️</button>
             </div>
         `;
         listEl.appendChild(li);
@@ -1175,3 +1253,234 @@ async function toggleClipMute(filename) {
         showToast(t('toast_command_error', 'Gagal mengubah status audio klip'), true);
     }
 }
+
+// --- Scheduling & Multiple Playlists Logic ---
+let schedulesData = { timezone_offset: 7, events: [] };
+let playlistsData = { screen1: { "Default": [] }, screen2: { "Default": [] } };
+let currentSelectedPlaylist = "Default";
+
+async function fetchPlaylistsAndSchedules() {
+    try {
+        const pRes = await fetch(getApiUrl('/api/playlists/list'));
+        if(pRes.ok) playlistsData = await pRes.json();
+        
+        const sRes = await fetch(getApiUrl('/api/schedule/config'));
+        if(sRes.ok) {
+            schedulesData = await sRes.json();
+            document.getElementById('tz-select').value = schedulesData.timezone_offset || 7;
+        }
+        
+        updateScheduleUI();
+        updatePlaylistDropdowns();
+    } catch(e) {
+        console.error("Error fetching playlists/schedules", e);
+    }
+}
+
+// Intercept original loadDevices to include this fetch on load
+const originalLoadDevices = loadDevices;
+loadDevices = async function() {
+    await originalLoadDevices();
+    fetchPlaylistsAndSchedules();
+}
+
+function updatePlaylistDropdowns() {
+    const selManager = document.getElementById('select-playlist');
+    const selModal = document.getElementById('sch-playlist-name');
+    if(!selManager || !selModal) return;
+    
+    selManager.innerHTML = '';
+    selModal.innerHTML = '';
+    
+    const screenKey = `screen${activeLibraryScreen}`;
+    const screenPlaylists = playlistsData[screenKey] || { "Default": [] };
+    
+    Object.keys(screenPlaylists).forEach(pName => {
+        selManager.innerHTML += `<option value="${pName}">${pName}</option>`;
+        selModal.innerHTML += `<option value="${pName}">${pName}</option>`;
+    });
+    
+    selManager.value = currentSelectedPlaylist;
+}
+
+window.changePlaylist = function() {
+    currentSelectedPlaylist = document.getElementById('select-playlist').value;
+    fetchActiveDeviceStatus();
+}
+
+window.createNewPlaylist = function() {
+    const name = prompt("Masukkan nama playlist baru:");
+    if(!name) return;
+    
+    const screenKey = `screen${activeLibraryScreen}`;
+    if(!playlistsData[screenKey]) playlistsData[screenKey] = {};
+    if(playlistsData[screenKey][name]) {
+        alert("Playlist sudah ada!");
+        return;
+    }
+    
+    playlistsData[screenKey][name] = [];
+    currentSelectedPlaylist = name;
+    saveAllPlaylists();
+}
+
+async function saveAllPlaylists() {
+    try {
+        await fetch(getApiUrl('/api/playlists/save_all'), {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify(playlistsData)
+        });
+        updatePlaylistDropdowns();
+        fetchActiveDeviceStatus();
+    } catch(e) {
+        showToast("Error saving playlists", true);
+    }
+}
+
+window.savePlaylistOrder = function() {
+    const listEl = document.getElementById('playlist-list-items');
+    const items = Array.from(listEl.children);
+    
+    const filenames = items
+        .filter(li => {
+            const cb = li.querySelector('.playlist-checkbox');
+            return cb ? cb.checked : true;
+        })
+        .map(li => li.dataset.filename).filter(Boolean);
+
+    const screenKey = `screen${activeLibraryScreen}`;
+    if(!playlistsData[screenKey]) playlistsData[screenKey] = {};
+    playlistsData[screenKey][currentSelectedPlaylist] = filenames;
+    
+    saveAllPlaylists();
+    showToast(t('toast_playlist_saved', 'Playlist disimpan!'));
+}
+
+// Scheduling UI
+function updateScheduleUI() {
+    const tbody = document.getElementById('schedule-table-body');
+    if(!tbody) return;
+    tbody.innerHTML = '';
+    
+    if(!schedulesData.events || schedulesData.events.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color: var(--text-muted);">Belum ada jadwal operasional.</td></tr>`;
+        return;
+    }
+    
+    schedulesData.events.forEach(ev => {
+        const tr = document.createElement('tr');
+        const days = ev.days.join(', ');
+        const actionStr = ev.type === 'power' ? `Power ${ev.action.toUpperCase()}` : `Load Playlist`;
+        const targetStr = ev.type === 'power' ? 'All System' : `Screen ${ev.screen} (${ev.playlist_name})`;
+        const statusClass = ev.enabled ? 'badge-success' : 'badge-error';
+        const statusText = ev.enabled ? 'Active' : 'Disabled';
+        
+        tr.innerHTML = `
+            <td><strong>${ev.time}</strong></td>
+            <td style="font-size: 11px;">${days}</td>
+            <td><span class="badge" style="background: rgba(255,255,255,0.1); border: 1px solid var(--border-color);">${actionStr}</span></td>
+            <td>${targetStr}</td>
+            <td><span class="badge ${statusClass}" style="cursor:pointer;" onclick="toggleScheduleStatus('${ev.id}')">${statusText}</span></td>
+            <td><button class="btn btn-sm btn-danger" onclick="deleteSchedule('${ev.id}')">Hapus</button></td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+window.saveTimezone = async function() {
+    schedulesData.timezone_offset = parseInt(document.getElementById('tz-select').value);
+    await saveSchedulesData();
+    showToast("Timezone berhasil disimpan");
+}
+
+window.openScheduleModal = function() {
+    document.getElementById('schedule-modal').classList.remove('hidden');
+    toggleScheduleForm();
+    // Refresh modal dropdown just in case
+    updatePlaylistDropdowns();
+}
+
+window.closeScheduleModal = function() {
+    document.getElementById('schedule-modal').classList.add('hidden');
+}
+
+window.toggleScheduleForm = function() {
+    const type = document.getElementById('sch-type').value;
+    if(type === 'power') {
+        document.getElementById('sch-power-fields').classList.remove('hidden');
+        document.getElementById('sch-playlist-fields').classList.add('hidden');
+    } else {
+        document.getElementById('sch-power-fields').classList.add('hidden');
+        document.getElementById('sch-playlist-fields').classList.remove('hidden');
+    }
+}
+
+window.saveNewSchedule = async function() {
+    const type = document.getElementById('sch-type').value;
+    const time = document.getElementById('sch-time').value;
+    if(!time) { alert("Pilih waktu eksekusi"); return; }
+    
+    const dayCheckboxes = document.querySelectorAll('#sch-days input:checked');
+    const days = Array.from(dayCheckboxes).map(cb => cb.value);
+    if(days.length === 0) { alert("Pilih minimal 1 hari pelaksanaan"); return; }
+    
+    // Conflict Check
+    const isConflict = schedulesData.events.some(ev => ev.time === time && ev.days.some(d => days.includes(d)));
+    if(isConflict) {
+        if(!confirm(t('toast_conflict', "Konflik: Jadwal sudah ada di waktu tersebut! Lanjutkan?"))) return;
+    }
+    
+    const newEvent = {
+        id: "sch-" + Date.now(),
+        type: type,
+        time: time,
+        days: days,
+        enabled: true
+    };
+    
+    if(type === 'power') {
+        newEvent.action = document.getElementById('sch-power-action').value;
+    } else {
+        newEvent.screen = parseInt(document.getElementById('sch-screen').value);
+        newEvent.playlist_name = document.getElementById('sch-playlist-name').value;
+    }
+    
+    if(!schedulesData.events) schedulesData.events = [];
+    schedulesData.events.push(newEvent);
+    
+    await saveSchedulesData();
+    closeScheduleModal();
+}
+
+window.deleteSchedule = async function(id) {
+    if(!confirm(t('confirm_delete_schedule', 'Hapus jadwal ini?'))) return;
+    schedulesData.events = schedulesData.events.filter(e => e.id !== id);
+    await saveSchedulesData();
+}
+
+window.toggleScheduleStatus = async function(id) {
+    const ev = schedulesData.events.find(e => e.id === id);
+    if(ev) {
+        ev.enabled = !ev.enabled;
+        await saveSchedulesData();
+    }
+}
+
+async function saveSchedulesData() {
+    try {
+        const res = await fetch(getApiUrl('/api/schedule/save'), {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(schedulesData)
+        });
+        if(res.ok) {
+            updateScheduleUI();
+        } else {
+            showToast("Gagal menyimpan jadwal", true);
+        }
+    } catch(e) {
+        showToast("Error menghubungi server", true);
+    }
+}
+
