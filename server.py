@@ -149,7 +149,9 @@ def check_schedules():
                             if IS_PI: 
                                 subprocess.run("sudo -u pi XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 wlr-randr --output HDMI-A-1 --on --output HDMI-A-2 --on", shell=True)
                                 time.sleep(2)
-                                subprocess.run("sudo systemctl start layar1.service layar2.service", shell=True)
+                                subprocess.run("sudo systemctl restart labwc.service", shell=True)
+                                time.sleep(3)
+                                subprocess.run("sudo systemctl restart layar1.service layar2.service", shell=True)
                                 
                     elif event.get("type") == "playlist":
                         screen = int(event.get("screen", 1))
