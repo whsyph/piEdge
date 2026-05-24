@@ -21,32 +21,35 @@
             <div class="brand">
                 <div class="brand-logo"></div>
                 <div class="brand-name">
-                    <h1>caPiBarra</h1>
-                    <span>Raspberry Pi Video CMS</span>
+                    <h1 data-i18n="brand_name">caPiBarra</h1>
+                    <span data-i18n="brand_sub">Raspberry Pi Video CMS</span>
                 </div>
             </div>
 
             <nav class="nav-menu">
-                <button class="nav-btn active" data-tab="overview">
-                    <span class="icon">📊</span> Overview Grid
+                <button class="nav-btn active" data-tab="overview" data-i18n="nav_overview">
+                    <span class="icon">📊</span> Grid Ringkasan
                 </button>
-                <button class="nav-btn" data-tab="control">
+                <button class="nav-btn" data-tab="control" data-i18n="nav_control">
                     <span class="icon">📺</span> Layar Kontrol
                 </button>
-                <button class="nav-btn" data-tab="library">
-                    <span class="icon">📁</span> Media Library
+                <button class="nav-btn" data-tab="library" data-i18n="nav_library">
+                    <span class="icon">📁</span> Pustaka Media
                 </button>
-                <button class="nav-btn" data-tab="settings">
+                <button class="nav-btn" data-tab="settings" data-i18n="nav_settings">
                     <span class="icon">⚙️</span> Pengaturan Pi
                 </button>
-                <button class="nav-btn" data-tab="about">
+                <button class="nav-btn" data-tab="config" data-i18n="nav_config">
+                    <span class="icon">🎨</span> Tampilan & Bahasa
+                </button>
+                <button class="nav-btn" data-tab="about" data-i18n="nav_about">
                     <span class="icon">ℹ️</span> Tentang Aplikasi
                 </button>
             </nav>
 
             <div class="sidebar-footer">
                 <div class="device-badge">
-                    <span id="active-device-name">Menghubungkan...</span>
+                    <span id="active-device-name" data-i18n="connecting">Menghubungkan...</span>
                     <span id="active-device-ip">127.0.0.1</span>
                 </div>
                 <div class="footer-notes">
@@ -63,17 +66,17 @@
                 <div class="header-left">
                     <div class="status-indicator">
                         <span id="global-status-dot" class="dot offline"></span>
-                        <span id="global-status-text">Mencari Perangkat...</span>
+                        <span id="global-status-text" data-i18n="status_offline_text">Mencari Perangkat...</span>
                     </div>
                 </div>
                 <div class="header-right">
                     <div class="switcher-wrapper">
-                        <label for="device-switcher">Pilih Perangkat:</label>
+                        <label for="device-switcher" data-i18n="select_device">Pilih Perangkat:</label>
                         <select id="device-switcher" class="device-select">
                             <!-- Dynamically populated -->
                         </select>
                     </div>
-                    <button id="btn-refresh" class="btn btn-secondary">🔄 Refresh</button>
+                    <button id="btn-refresh" class="btn btn-secondary" data-i18n="btn_refresh">🔄 Segarkan</button>
                 </div>
             </header>
 
@@ -83,8 +86,8 @@
                 <!-- TAB 1: OVERVIEW GRID -->
                 <div id="tab-overview" class="tab-panel active">
                     <div class="section-header">
-                        <h2>Semua Perangkat Layar</h2>
-                        <p>Status real-time dari seluruh Raspberry Pi di museum</p>
+                        <h2 data-i18n="all_screens">Semua Perangkat Layar</h2>
+                        <p data-i18n="all_screens_sub">Status real-time dari seluruh Raspberry Pi di museum</p>
                     </div>
                     <div id="devices-grid" class="devices-grid">
                         <!-- Dynamically generated cards -->
@@ -95,11 +98,11 @@
                 <div id="tab-control" class="tab-panel">
                     <div class="section-header control-header-row">
                         <div>
-                            <h2>Kontrol Layar Aktif</h2>
-                            <p>Kelola pemutaran video secara real-time pada monitor HDMI</p>
+                            <h2 data-i18n="active_control">Kontrol Layar Aktif</h2>
+                            <p data-i18n="active_control_sub">Kelola pemutaran video secara real-time pada monitor HDMI</p>
                         </div>
                         <div class="toggle-preview-wrapper">
-                            <span class="switch-label">Auto Preview (5s)</span>
+                            <span class="switch-label" data-i18n="auto_preview">Preview Otomatis (5d)</span>
                             <label class="switch">
                                 <input type="checkbox" id="preview-toggle">
                                 <span class="slider round"></span>
@@ -111,7 +114,7 @@
                         <!-- Screen 1 Card -->
                         <div class="screen-card">
                             <div class="screen-header-bar">
-                                <h3>Layar 1 (HDMI-A-1)</h3>
+                                <h3 data-i18n="screen1_title">Layar 1 (HDMI-A-1)</h3>
                                 <span id="s1-status-badge" class="badge badge-error">Offline</span>
                             </div>
 
@@ -120,9 +123,9 @@
                                 <img id="s1-preview" src="placeholder.jpg" alt="Layar 1 Preview"
                                     onerror="this.src='placeholder.jpg'">
                                 <button class="btn-preview-refresh" onclick="refreshSingleScreenshot(1)"
-                                    title="Ambil Screenshot Baru">📸 Ambil Preview</button>
+                                    data-i18n="btn_screenshot" title="Ambil Screenshot Baru">📸 Ambil Preview</button>
                                 <div class="preview-overlay">
-                                    <span id="s1-playing-title" class="playing-title">Tidak ada media</span>
+                                    <span id="s1-playing-title" class="playing-title" data-i18n="no_media">Daftar putar kosong / Berhenti</span>
                                 </div>
                             </div>
 
@@ -149,33 +152,37 @@
                                 </div>
 
                                 <div class="audio-controls">
-                                    <h4>Kontrol Audio</h4>
-                                    <div class="audio-controls-row">
-                                        <button id="s1-btn-mute" class="btn btn-sm btn-secondary"
-                                            onclick="toggleGlobalMute(1)" title="Mute/Unmute">🔇 Muted</button>
-                                        <select id="s1-select-audio-route" class="form-select select-sm"
-                                            onchange="changeAudioRoute(1)">
-                                            <option value="hdmi">HDMI Output</option>
-                                            <option value="jack">3.5mm Jack Output</option>
-                                        </select>
-                                        <select id="s1-select-audio-channel" class="form-select select-sm"
-                                            onchange="changeAudioChannel(1)">
-                                            <option value="stereo">Stereo</option>
-                                            <option value="left">Channel L (Kiri)</option>
-                                            <option value="right">Channel R (Kanan)</option>
-                                        </select>
+                                    <h4 data-i18n="audio_control_header">Kontrol Audio</h4>
+                                    <div class="audio-controls-grid">
+                                        <div class="audio-row-1">
+                                            <button id="s1-btn-mute" class="btn btn-sm btn-secondary btn-full"
+                                                onclick="toggleGlobalMute(1)" data-i18n="opt_muted">🔇 Senyap</button>
+                                        </div>
+                                        <div class="audio-row-2">
+                                            <select id="s1-select-audio-route" class="form-select select-sm"
+                                                onchange="changeAudioRoute(1)">
+                                                <option value="hdmi" data-i18n="opt_hdmi">HDMI Output</option>
+                                                <option value="jack" data-i18n="opt_jack">3.5mm Jack Output</option>
+                                            </select>
+                                            <select id="s1-select-audio-channel" class="form-select select-sm"
+                                                onchange="changeAudioChannel(1)">
+                                                <option value="stereo" data-i18n="opt_stereo">Stereo</option>
+                                                <option value="left" data-i18n="opt_left">Channel L (Kiri)</option>
+                                                <option value="right" data-i18n="opt_right">Channel R (Kanan)</option>
+                                            </select>
+                                        </div>
                                     </div>
                                 </div>
 
                                 <div class="service-controls">
-                                    <h4>Layanan Systemd</h4>
+                                    <h4 data-i18n="systemd_service_header">Layanan Systemd</h4>
                                     <div class="btn-group">
                                         <button class="btn btn-sm btn-success"
-                                            onclick="controlDevice(1, 'start_service')">Start</button>
+                                            onclick="controlDevice(1, 'start_service')" data-i18n="btn_start">Start</button>
                                         <button class="btn btn-sm btn-warning"
-                                            onclick="controlDevice(1, 'restart_service')">Restart</button>
+                                            onclick="controlDevice(1, 'restart_service')" data-i18n="btn_restart">Restart</button>
                                         <button class="btn btn-sm btn-danger"
-                                            onclick="controlDevice(1, 'stop_service')">Stop</button>
+                                            onclick="controlDevice(1, 'stop_service')" data-i18n="btn_stop">Stop</button>
                                     </div>
                                 </div>
                             </div>
@@ -184,7 +191,7 @@
                         <!-- Screen 2 Card -->
                         <div class="screen-card">
                             <div class="screen-header-bar">
-                                <h3>Layar 2 (HDMI-A-2)</h3>
+                                <h3 data-i18n="screen2_title">Layar 2 (HDMI-A-2)</h3>
                                 <span id="s2-status-badge" class="badge badge-error">Offline</span>
                             </div>
 
@@ -193,9 +200,9 @@
                                 <img id="s2-preview" src="placeholder.jpg" alt="Layar 2 Preview"
                                     onerror="this.src='placeholder.jpg'">
                                 <button class="btn-preview-refresh" onclick="refreshSingleScreenshot(2)"
-                                    title="Ambil Screenshot Baru">📸 Ambil Preview</button>
+                                    data-i18n="btn_screenshot" title="Ambil Screenshot Baru">📸 Ambil Preview</button>
                                 <div class="preview-overlay">
-                                    <span id="s2-playing-title" class="playing-title">Tidak ada media</span>
+                                    <span id="s2-playing-title" class="playing-title" data-i18n="no_media">Daftar putar kosong / Berhenti</span>
                                 </div>
                             </div>
 
@@ -222,33 +229,37 @@
                                 </div>
 
                                 <div class="audio-controls">
-                                    <h4>Kontrol Audio</h4>
-                                    <div class="audio-controls-row">
-                                        <button id="s2-btn-mute" class="btn btn-sm btn-secondary"
-                                            onclick="toggleGlobalMute(2)" title="Mute/Unmute">🔇 Muted</button>
-                                        <select id="s2-select-audio-route" class="form-select select-sm"
-                                            onchange="changeAudioRoute(2)">
-                                            <option value="hdmi">HDMI Output</option>
-                                            <option value="jack">3.5mm Jack Output</option>
-                                        </select>
-                                        <select id="s2-select-audio-channel" class="form-select select-sm"
-                                            onchange="changeAudioChannel(2)">
-                                            <option value="stereo">Stereo</option>
-                                            <option value="left">Channel L (Kiri)</option>
-                                            <option value="right">Channel R (Kanan)</option>
-                                        </select>
+                                    <h4 data-i18n="audio_control_header">Kontrol Audio</h4>
+                                    <div class="audio-controls-grid">
+                                        <div class="audio-row-1">
+                                            <button id="s2-btn-mute" class="btn btn-sm btn-secondary btn-full"
+                                                onclick="toggleGlobalMute(2)" data-i18n="opt_muted">🔇 Senyap</button>
+                                        </div>
+                                        <div class="audio-row-2">
+                                            <select id="s2-select-audio-route" class="form-select select-sm"
+                                                onchange="changeAudioRoute(2)">
+                                                <option value="hdmi" data-i18n="opt_hdmi">HDMI Output</option>
+                                                <option value="jack" data-i18n="opt_jack">3.5mm Jack Output</option>
+                                            </select>
+                                            <select id="s2-select-audio-channel" class="form-select select-sm"
+                                                onchange="changeAudioChannel(2)">
+                                                <option value="stereo" data-i18n="opt_stereo">Stereo</option>
+                                                <option value="left" data-i18n="opt_left">Channel L (Kiri)</option>
+                                                <option value="right" data-i18n="opt_right">Channel R (Kanan)</option>
+                                            </select>
+                                        </div>
                                     </div>
                                 </div>
 
                                 <div class="service-controls">
-                                    <h4>Layanan Systemd</h4>
+                                    <h4 data-i18n="systemd_service_header">Layanan Systemd</h4>
                                     <div class="btn-group">
                                         <button class="btn btn-sm btn-success"
-                                            onclick="controlDevice(2, 'start_service')">Start</button>
+                                            onclick="controlDevice(2, 'start_service')" data-i18n="btn_start">Start</button>
                                         <button class="btn btn-sm btn-warning"
-                                            onclick="controlDevice(2, 'restart_service')">Restart</button>
+                                            onclick="controlDevice(2, 'restart_service')" data-i18n="btn_restart">Restart</button>
                                         <button class="btn btn-sm btn-danger"
-                                            onclick="controlDevice(2, 'stop_service')">Stop</button>
+                                            onclick="controlDevice(2, 'stop_service')" data-i18n="btn_stop">Stop</button>
                                     </div>
                                 </div>
                             </div>
@@ -259,26 +270,26 @@
                 <!-- TAB 3: MEDIA LIBRARY -->
                 <div id="tab-library" class="tab-panel">
                     <div class="section-header">
-                        <h2>Media Library & Playlist Manager</h2>
-                        <p>Upload video baru dan tentukan urutan daftar putar pada tiap layar</p>
+                        <h2 data-i18n="library_header">Pustaka Media & Pengelola Playlist</h2>
+                        <p data-i18n="library_sub_desc">Upload video baru dan tentukan urutan daftar putar pada tiap layar</p>
                     </div>
 
                     <div class="library-container">
                         <!-- Left Panel: Uploader -->
                         <div class="library-left-card">
-                            <h3>Upload Video Baru</h3>
+                            <h3 data-i18n="upload_title">Unggah Video Baru</h3>
                             <div class="upload-zone" id="drop-zone">
                                 <div class="upload-icon">📤</div>
-                                <p>Drag & drop file video di sini, atau klik untuk memilih</p>
-                                <span class="upload-hint">Format yang didukung: MP4, MKV, AVI, MOV</span>
+                                <p data-i18n="drop_zone">Tarik & lepas file video di sini, atau klik untuk memilih</p>
+                                <span class="upload-hint" data-i18n="supported_formats">Format yang didukung: MP4, MKV, AVI, MOV</span>
                                 <input type="file" id="file-input" accept="video/*" style="display: none;">
                             </div>
 
                             <div class="form-group margin-top-md">
-                                <label for="upload-target-screen">Tujuan Layar:</label>
+                                <label for="upload-target-screen" data-i18n="target_screen_label">Tujuan Layar:</label>
                                 <select id="upload-target-screen" class="form-select">
-                                    <option value="1">Layar 1 (HDMI-1)</option>
-                                    <option value="2">Layar 2 (HDMI-2)</option>
+                                    <option value="1" data-i18n="target_screen_1">Layar 1 (HDMI-1)</option>
+                                    <option value="2" data-i18n="target_screen_2">Layar 2 (HDMI-2)</option>
                                 </select>
                             </div>
 
@@ -298,18 +309,17 @@
                         <div class="library-right-card">
                             <div class="tabs-sub">
                                 <button class="btn btn-secondary active" id="btn-sub-s1"
-                                    onclick="switchLibraryScreen(1)">Layar 1 Playlist</button>
-                                <button class="btn btn-secondary" id="btn-sub-s2" onclick="switchLibraryScreen(2)">Layar
-                                    2 Playlist</button>
+                                    onclick="switchLibraryScreen(1)" data-i18n="playlist_tab_1">Layar 1 Playlist</button>
+                                <button class="btn btn-secondary" id="btn-sub-s2" onclick="switchLibraryScreen(2)"
+                                    data-i18n="playlist_tab_2">Layar 2 Playlist</button>
                             </div>
 
                             <div class="playlist-manager-box">
                                 <div class="playlist-header">
-                                    <h4>Daftar Putar Video</h4>
-                                    <button class="btn btn-sm btn-primary" onclick="savePlaylistOrder()">💾 Simpan
-                                        Urutan</button>
+                                    <h4 data-i18n="playlist_title">Daftar Putar Video</h4>
+                                    <button class="btn btn-sm btn-primary" onclick="savePlaylistOrder()" data-i18n="btn_save_order">💾 Simpan Urutan</button>
                                 </div>
-                                <p class="help-text">Gunakan tombol 🔼 dan 🔽 untuk mengatur urutan putar video</p>
+                                <p class="help-text" data-i18n="playlist_sub">Gunakan tombol 🔼 dan 🔽 untuk mengatur urutan putar video</p>
                                 <ul class="playlist-list" id="playlist-list-items">
                                     <!-- Dynamic playlist list -->
                                 </ul>
@@ -321,38 +331,38 @@
                 <!-- TAB 4: PENGATURAN PI -->
                 <div id="tab-settings" class="tab-panel">
                     <div class="section-header">
-                        <h2>Sistem & Konfigurasi Perangkat</h2>
-                        <p>Kelola alamat IP Raspberry Pi dan lihat diagnosis performa</p>
+                        <h2 data-i18n="settings_header">Sistem & Konfigurasi Perangkat</h2>
+                        <p data-i18n="settings_sub">Kelola alamat IP Raspberry Pi dan lihat diagnosis performa</p>
                     </div>
 
                     <div class="settings-row">
                         <!-- Left Panel: Diagnostics -->
                         <div class="settings-card">
-                            <h3>Status Diagnostik</h3>
+                            <h3 data-i18n="diagnostic_title">Status Diagnostik</h3>
                             <div class="metrics-grid">
                                 <div class="metric-item">
-                                    <div class="metric-label">Temperatur CPU</div>
+                                    <div class="metric-label" data-i18n="cpu_temp_label">Temperatur CPU</div>
                                     <div class="metric-value" id="diag-temp">0.0°C</div>
                                     <div class="metric-progress-bar">
                                         <div id="diag-temp-bar" style="width: 0%"></div>
                                     </div>
                                 </div>
                                 <div class="metric-item">
-                                    <div class="metric-label">Penggunaan CPU</div>
+                                    <div class="metric-label" data-i18n="cpu_percent_label">Penggunaan CPU</div>
                                     <div class="metric-value" id="diag-cpu">0.0%</div>
                                     <div class="metric-progress-bar">
                                         <div id="diag-cpu-bar" style="width: 0%"></div>
                                     </div>
                                 </div>
                                 <div class="metric-item">
-                                    <div class="metric-label">RAM Terpakai</div>
+                                    <div class="metric-label" data-i18n="ram_label">RAM Terpakai</div>
                                     <div class="metric-value" id="diag-ram">0 / 0 MB (0%)</div>
                                     <div class="metric-progress-bar">
                                         <div id="diag-ram-bar" style="width: 0%"></div>
                                     </div>
                                 </div>
                                 <div class="metric-item">
-                                    <div class="metric-label">Disk Space</div>
+                                    <div class="metric-label" data-i18n="disk_label">Ruang Disk</div>
                                     <div class="metric-value" id="diag-disk">0 / 0 GB (0%)</div>
                                     <div class="metric-progress-bar">
                                         <div id="diag-disk-bar" style="width: 0%"></div>
@@ -360,41 +370,41 @@
                                 </div>
                             </div>
                             <div class="diag-meta">
-                                <p><strong>Uptime:</strong> <span id="diag-uptime">-</span></p>
-                                <p><strong>Model:</strong> Raspberry Pi 4 Model B</p>
+                                <p><strong data-i18n="uptime_label">Uptime</strong>: <span id="diag-uptime">-</span></p>
+                                <p data-i18n="device_model">Model: Raspberry Pi 4 Model B</p>
                             </div>
                         </div>
 
                         <!-- Right Panel: Device List -->
                         <div class="settings-card">
-                            <h3>Kelola Daftar Perangkat Pi</h3>
+                            <h3 data-i18n="manage_pi">Kelola Daftar Perangkat Pi</h3>
                             <form id="form-add-device" class="device-form">
                                 <div class="form-row">
                                     <div class="form-group flex-2">
-                                        <label for="new-device-name">Nama Perangkat:</label>
-                                        <input type="text" id="new-device-name" placeholder="mis. Layar Lobby" required>
+                                        <label for="new-device-name" data-i18n="new_device_name_label">Nama Perangkat:</label>
+                                        <input type="text" id="new-device-name" data-i18n="placeholder_device_name" placeholder="mis. Layar Lobby" required>
                                     </div>
                                     <div class="form-group flex-2">
-                                        <label for="new-device-ip">Alamat IP / Domain:</label>
-                                        <input type="text" id="new-device-ip" placeholder="mis. 192.168.88.47" required>
+                                        <label for="new-device-ip" data-i18n="new_device_ip_label">Alamat IP / Domain:</label>
+                                        <input type="text" id="new-device-ip" data-i18n="placeholder_device_ip" placeholder="mis. 192.168.88.47" required>
                                     </div>
                                     <div class="form-group flex-1">
-                                        <label for="new-device-port">Port:</label>
+                                        <label for="new-device-port" data-i18n="new_device_port_label">Port:</label>
                                         <input type="number" id="new-device-port" value="8080" required>
                                     </div>
                                 </div>
-                                <button type="submit" class="btn btn-primary margin-top-sm">➕ Tambah Perangkat</button>
+                                <button type="submit" class="btn btn-primary margin-top-sm" data-i18n="btn_add_device">➕ Tambah Perangkat</button>
                             </form>
 
                             <div class="device-list-box margin-top-md">
-                                <h4>Daftar Perangkat Terdaftar</h4>
+                                <h4 data-i18n="registered_devices_title">Daftar Perangkat Terdaftar</h4>
                                 <table class="device-table">
                                     <thead>
                                         <tr>
-                                            <th>Nama</th>
-                                            <th>IP Address</th>
-                                            <th>Port</th>
-                                            <th>Aksi</th>
+                                            <th data-i18n="th_name">Nama</th>
+                                            <th data-i18n="th_ip">IP Address</th>
+                                            <th data-i18n="th_port">Port</th>
+                                            <th data-i18n="th_action">Aksi</th>
                                         </tr>
                                     </thead>
                                     <tbody id="device-table-body">
@@ -406,11 +416,36 @@
                     </div>
                 </div>
 
-                <!-- TAB 5: TENTANG APLIKASI -->
+                <!-- TAB 5: CONFIG TAMPILAN -->
+                <div id="tab-config" class="tab-panel">
+                    <div class="section-header">
+                        <h2 data-i18n="config_header">Konfigurasi Tampilan & Bahasa</h2>
+                        <p data-i18n="config_sub">Sesuaikan tema warna preset dan bahasa antarmuka aplikasi</p>
+                    </div>
+
+                    <div class="config-card">
+                        <div class="form-group">
+                            <label for="theme-select" data-i18n="theme_select_label">Preset Warna (Skin):</label>
+                            <select id="theme-select" class="form-select" onchange="changeTheme(this.value)">
+                                <option value="modern">✨ Modern Dark</option>
+                                <option value="retro">📻 Retro Cyber</option>
+                            </select>
+                        </div>
+                        <div class="form-group margin-top-md">
+                            <label for="lang-select" data-i18n="lang_select_label">Bahasa Antarmuka (Language):</label>
+                            <select id="lang-select" class="form-select" onchange="changeLanguage(this.value)">
+                                <option value="id">🇮🇩 Indonesia</option>
+                                <option value="en">🇬🇧 English</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 6: TENTANG APLIKASI -->
                 <div id="tab-about" class="tab-panel">
                     <div class="section-header">
-                        <h2>Tentang Aplikasi</h2>
-                        <p>Informasi detail mengenai perangkat lunak kontrol pemutar video piEdge</p>
+                        <h2 data-i18n="about_header">Tentang Aplikasi</h2>
+                        <p data-i18n="about_sub">Informasi detail mengenai perangkat lunak kontrol pemutar video piEdge</p>
                     </div>
 
                     <div class="about-card">
@@ -422,10 +457,10 @@
                         </div>
 
                         <div class="about-desc">
-                            <p><strong>piEdge CMS Signage</strong> adalah sistem manajemen konten (CMS) signage
+                            <p data-i18n="about_desc_1"><strong>piEdge CMS Signage</strong> adalah sistem manajemen konten (CMS) signage
                                 multimedia berbasis web yang dikembangkan khusus untuk mengelola pemutaran video secara
                                 mandiri maupun terpusat pada Raspberry Pi 4.</p>
-                            <p>Software ini mengintegrasikan server web multi-thread berdaya rendah dengan antarmuka
+                            <p data-i18n="about_desc_2">Software ini mengintegrasikan server web multi-thread berdaya rendah dengan antarmuka
                                 pemrograman video MPV melalui soket IPC Unix, memungkinkan kontrol pemutaran video
                                 berkinerja tinggi langsung ke port hardware HDMI (HDMI-A-1 dan HDMI-A-2) secara mulus,
                                 efisien, dan tanpa hambatan.</p>
@@ -435,19 +470,19 @@
 
                         <div class="credits-grid">
                             <div class="credit-item">
-                                <span class="credit-label">Project Director</span>
+                                <span class="credit-label" data-i18n="about_director">Project Director</span>
                                 <span class="credit-value">Andri Risdianto</span>
                             </div>
                             <div class="credit-item">
-                                <span class="credit-label">Lead Designer</span>
+                                <span class="credit-label" data-i18n="about_designer">Lead Designer</span>
                                 <span class="credit-value">Yoga Sadewo</span>
                             </div>
                             <div class="credit-item">
-                                <span class="credit-label">UI/UX</span>
+                                <span class="credit-label" data-i18n="about_uiux">UI/UX</span>
                                 <span class="credit-value">Reza Pahlevi</span>
                             </div>
                             <div class="credit-item full-width">
-                                <span class="credit-label">Development Team</span>
+                                <span class="credit-label" data-i18n="about_dev_team">Tim Pengembang</span>
                                 <span class="credit-value">Arief Hermanto, Arif Rofiudin, Farid Hidayat, Faiz Satrio,
                                     Wildan Ferdy.</span>
                             </div>

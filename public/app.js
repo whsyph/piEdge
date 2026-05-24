@@ -1,5 +1,298 @@
 // Museum Signage CMS - Frontend Controller
 
+const i18n = {
+    id: {
+        brand_name: "caPiBarra",
+        brand_sub: "Raspberry Pi Video CMS",
+        nav_overview: "📊 Grid Ringkasan",
+        nav_control: "📺 Layar Kontrol",
+        nav_library: "📁 Pustaka Media",
+        nav_settings: "⚙️ Pengaturan Pi",
+        nav_about: "ℹ️ Tentang Aplikasi",
+        active_device: "Perangkat Aktif:",
+        connecting: "Menghubungkan...",
+        status_offline_text: "Mencari Perangkat...",
+        select_device: "Pilih Perangkat:",
+        btn_refresh: "🔄 Segarkan",
+        all_screens: "Semua Perangkat Layar",
+        all_screens_sub: "Status real-time dari seluruh Raspberry Pi di museum",
+        active_control: "Kontrol Layar Aktif",
+        active_control_sub: "Kelola pemutaran video secara real-time pada monitor HDMI",
+        auto_preview: "Preview Otomatis (5d)",
+        screen1_title: "Layar 1 (HDMI-A-1)",
+        screen2_title: "Layar 2 (HDMI-A-2)",
+        btn_screenshot: "📸 Ambil Preview",
+        no_media: "Daftar putar kosong / Berhenti",
+        audio_control_header: "Kontrol Audio",
+        systemd_service_header: "Layanan Systemd",
+        upload_title: "Unggah Video Baru",
+        drop_zone: "Tarik & lepas file video di sini, atau klik untuk memilih",
+        supported_formats: "Format yang didukung: MP4, MKV, AVI, MOV",
+        target_screen_label: "Tujuan Layar:",
+        target_screen_1: "Layar 1 (HDMI-1)",
+        target_screen_2: "Layar 2 (HDMI-2)",
+        playlist_title: "Daftar Putar Video",
+        btn_save_order: "💾 Simpan Urutan",
+        playlist_sub: "Gunakan tombol 🔼 dan 🔽 untuk mengatur urutan putar video",
+        diagnostic_title: "Status Diagnostik",
+        cpu_temp_label: "Temperatur CPU",
+        cpu_percent_label: "Penggunaan CPU",
+        ram_label: "RAM Terpakai",
+        disk_label: "Ruang Disk",
+        device_model: "Model: Raspberry Pi 4 Model B",
+        manage_pi: "Kelola Daftar Perangkat Pi",
+        new_device_name_label: "Nama Perangkat:",
+        new_device_ip_label: "Alamat IP / Domain:",
+        new_device_port_label: "Port:",
+        btn_add_device: "➕ Tambah Perangkat",
+        registered_devices_title: "Daftar Perangkat Terdaftar",
+        th_name: "Nama",
+        th_ip: "Alamat IP",
+        th_port: "Port",
+        th_action: "Aksi",
+        about_header: "Tentang Aplikasi",
+        about_sub: "Informasi detail mengenai perangkat lunak kontrol pemutar video piEdge",
+        about_desc_1: "<strong>piEdge CMS Signage</strong> adalah sistem manajemen konten (CMS) signage multimedia berbasis web yang dikembangkan khusus untuk mengelola pemutaran video secara mandiri maupun terpusat pada Raspberry Pi 4.",
+        about_desc_2: "Software ini mengintegrasikan server web multi-thread berdaya rendah dengan antarmuka pemrograman video MPV melalui soket IPC Unix, memungkinkan kontrol pemutaran video berkinerja tinggi langsung to port hardware HDMI (HDMI-A-1 dan HDMI-A-2) secara mulus, efisien, dan tanpa hambatan.",
+        
+        opt_hdmi: "HDMI Output",
+        opt_jack: "3.5mm Jack Output",
+        opt_stereo: "Stereo",
+        opt_left: "Channel L (Kiri)",
+        opt_right: "Channel R (Kanan)",
+        
+        btn_start: "Start",
+        btn_restart: "Restart",
+        btn_stop: "Stop",
+        
+        uptime_label: "Uptime",
+        status_online: "Online",
+        status_offline: "Offline",
+        connection_lost: "Koneksi Terputus",
+        status_playing: "Memutar",
+        status_active_no_mpv: "Aktif (Tanpa MPV)",
+        status_service_inactive: "Layanan Tidak Aktif",
+        status_stopped: "Berhenti",
+        status_unreachable: "Tidak Terjangkau",
+        empty_folder: "Folder media kosong. Silakan unggah file video.",
+        badge_muted: "🔇 Senyap",
+        badge_sound: "🔊 Bersuara",
+        opt_muted: "🔇 Senyap",
+        opt_audio_on: "🔊 Audio Hidup",
+        
+        toast_device_offline_preview: "Perangkat offline, tidak bisa mengambil preview",
+        toast_capturing_screenshot: "Mengambil tangkapan layar baru untuk Layar {screen}...",
+        toast_command_sent: "Perintah berhasil dikirim",
+        toast_refreshing: "Menyegarkan data...",
+        toast_autopreview_on: "Auto preview diaktifkan (5d)",
+        toast_autopreview_off: "Auto preview dimatikan",
+
+        library_header: "Pustaka Media & Pengelola Playlist",
+        library_sub_desc: "Unggah video baru dan tentukan urutan daftar putar pada tiap layar",
+        playlist_tab_1: "Layar 1 Playlist",
+        playlist_tab_2: "Layar 2 Playlist",
+        settings_header: "Sistem & Konfigurasi Perangkat",
+        settings_sub: "Kelola alamat IP Raspberry Pi dan lihat diagnosis performa",
+        placeholder_device_name: "mis. Layar Lobby",
+        placeholder_device_ip: "mis. 192.168.88.47",
+        about_director: "Project Director",
+        about_designer: "Lead Designer",
+        about_uiux: "UI/UX",
+        about_dev_team: "Tim Pengembang",
+
+        confirm_delete_video: "Apakah Anda yakin ingin menghapus \"{filename}\" dari Layar {screen}?",
+        confirm_delete_device: "Hapus perangkat \"{name}\" dari daftar kontrol?",
+        toast_upload_success: "File berhasil diunggah!",
+        toast_upload_fail: "Gagal mengunggah file!",
+        toast_upload_error: "Koneksi gagal saat mengunggah file",
+        toast_command_fail: "Gagal: {error}",
+        toast_command_error: "Error mengirim perintah kontrol",
+        toast_playlist_saved: "Urutan playlist berhasil disimpan!",
+        toast_playlist_save_fail: "Gagal menyimpan: {error}",
+        toast_playlist_error: "Error menghubungi server untuk playlist",
+        toast_device_added: "Perangkat \"{name}\" ditambahkan",
+        toast_device_deleted: "Perangkat dihapus",
+        toast_audio_muted: "Audio Layar {screen} Dimatikan",
+        toast_audio_unmuted: "Audio Layar {screen} Dihidupkan",
+        toast_audio_channel_changed: "Channel Audio Layar {screen} diubah ke {channel}",
+        toast_clip_muted: "Audio klip \"{filename}\" Dimatikan",
+        toast_clip_unmuted: "Audio klip \"{filename}\" Dihidupkan",
+        nav_config: "🎨 Tampilan & Bahasa",
+        config_header: "Konfigurasi Tampilan & Bahasa",
+        config_sub: "Sesuaikan tema warna preset dan bahasa antarmuka aplikasi",
+        theme_select_label: "Preset Warna (Skin):",
+        lang_select_label: "Bahasa Antarmuka (Language):"
+    },
+    en: {
+        brand_name: "caPiBarra",
+        brand_sub: "Raspberry Pi Video CMS",
+        nav_overview: "📊 Overview Grid",
+        nav_control: "📺 Control Screen",
+        nav_library: "📁 Media Library",
+        nav_settings: "⚙️ Pi Settings",
+        nav_about: "ℹ️ About App",
+        active_device: "Connecting...",
+        connecting: "Connecting...",
+        status_offline_text: "Searching Device...",
+        select_device: "Select Device:",
+        btn_refresh: "🔄 Refresh",
+        all_screens: "All Screen Devices",
+        all_screens_sub: "Real-time status of all Raspberry Pi units in the museum",
+        active_control: "Active Screen Control",
+        active_control_sub: "Manage real-time video playback on HDMI monitors",
+        auto_preview: "Auto Preview (5s)",
+        screen1_title: "Screen 1 (HDMI-A-1)",
+        screen2_title: "Screen 2 (HDMI-A-2)",
+        btn_screenshot: "📸 Get Preview",
+        no_media: "Playlist empty / Stopped",
+        audio_control_header: "Audio Control",
+        systemd_service_header: "Systemd Service",
+        upload_title: "Upload New Video",
+        drop_zone: "Drag & drop video files here, or click to browse",
+        supported_formats: "Supported formats: MP4, MKV, AVI, MOV",
+        target_screen_label: "Target Screen:",
+        target_screen_1: "Screen 1 (HDMI-1)",
+        target_screen_2: "Screen 2 (HDMI-2)",
+        playlist_title: "Video Playlist",
+        btn_save_order: "💾 Save Order",
+        playlist_sub: "Use 🔼 and 🔽 buttons to reorder video playback",
+        diagnostic_title: "Diagnostic Status",
+        cpu_temp_label: "CPU Temperature",
+        cpu_percent_label: "CPU Usage",
+        ram_label: "RAM Used",
+        disk_label: "Disk Space",
+        device_model: "Model: Raspberry Pi 4 Model B",
+        manage_pi: "Manage Pi Device List",
+        new_device_name_label: "Device Name:",
+        new_device_ip_label: "IP Address / Domain:",
+        new_device_port_label: "Port:",
+        btn_add_device: "➕ Add Device",
+        registered_devices_title: "Registered Device List",
+        th_name: "Name",
+        th_ip: "IP Address",
+        th_port: "Port",
+        th_action: "Action",
+        about_header: "About Application",
+        about_sub: "Detailed information about the piEdge video player control software",
+        about_desc_1: "<strong>piEdge CMS Signage</strong> is a web-based multimedia signage content management system (CMS) specifically developed to manage video playback independently or centrally on Raspberry Pi 4.",
+        about_desc_2: "This software integrates a low-power multi-threaded web server with the MPV video programming interface via Unix IPC sockets, enabling high-performance video playback control directly to the hardware HDMI ports (HDMI-A-1 and HDMI-A-2) seamlessly, efficiently, and without lag.",
+        
+        opt_hdmi: "HDMI Output",
+        opt_jack: "3.5mm Jack Output",
+        opt_stereo: "Stereo",
+        opt_left: "Channel L (Left)",
+        opt_right: "Channel R (Right)",
+        
+        btn_start: "Start",
+        btn_restart: "Restart",
+        btn_stop: "Stop",
+        
+        uptime_label: "Uptime",
+        status_online: "Online",
+        status_offline: "Offline",
+        connection_lost: "Connection Lost",
+        status_playing: "Playing",
+        status_active_no_mpv: "Active (No MPV)",
+        status_service_inactive: "Service Inactive",
+        status_stopped: "Stopped",
+        status_unreachable: "Unreachable",
+        empty_folder: "Media folder is empty. Please upload video files.",
+        badge_muted: "🔇 Muted",
+        badge_sound: "🔊 Sound",
+        opt_muted: "🔇 Muted",
+        opt_audio_on: "🔊 Audio ON",
+        
+        toast_device_offline_preview: "Device offline, cannot capture preview",
+        toast_capturing_screenshot: "Capturing new screenshot for Screen {screen}...",
+        toast_command_sent: "Command successfully sent",
+        toast_refreshing: "Refreshing data...",
+        toast_autopreview_on: "Auto preview enabled (5s)",
+        toast_autopreview_off: "Auto preview disabled",
+ 
+        library_header: "Media Library & Playlist Manager",
+        library_sub_desc: "Upload new videos and configure playlist ordering for each screen",
+        playlist_tab_1: "Screen 1 Playlist",
+        playlist_tab_2: "Screen 2 Playlist",
+        settings_header: "System & Device Configuration",
+        settings_sub: "Manage Raspberry Pi IP addresses and view performance diagnostics",
+        placeholder_device_name: "e.g., Lobby Screen",
+        placeholder_device_ip: "e.g., 192.168.88.47",
+        about_director: "Project Director",
+        about_designer: "Lead Designer",
+        about_uiux: "UI/UX",
+        about_dev_team: "Development Team",
+ 
+        confirm_delete_video: "Are you sure you want to delete \"{filename}\" from Screen {screen}?",
+        confirm_delete_device: "Remove device \"{name}\" from control list?",
+        toast_upload_success: "File uploaded successfully!",
+        toast_upload_fail: "Failed to upload file!",
+        toast_upload_error: "Connection failed during file upload",
+        toast_command_fail: "Failed: {error}",
+        toast_command_error: "Error sending control command",
+        toast_playlist_saved: "Playlist order saved successfully!",
+        toast_playlist_save_fail: "Failed to save: {error}",
+        toast_playlist_error: "Error contacting server for playlist",
+        toast_device_added: "Device \"{name}\" added",
+        toast_device_deleted: "Device removed",
+        toast_audio_muted: "Screen {screen} Audio Muted",
+        toast_audio_unmuted: "Screen {screen} Audio Enabled",
+        toast_audio_route_changed: "Screen {screen} audio output routed to {route}",
+        toast_audio_channel_changed: "Screen {screen} audio channel changed to {channel}",
+        toast_clip_muted: "Clip \"{filename}\" audio muted",
+        toast_clip_unmuted: "Clip \"{filename}\" audio enabled",
+        nav_config: "🎨 UI Settings",
+        config_header: "UI & Language Configuration",
+        config_sub: "Customize color theme presets and interface language",
+        theme_select_label: "Color Preset (Skin):",
+        lang_select_label: "Interface Language:"
+    }
+};
+
+let currentLang = localStorage.getItem('piEdge_lang') || 'id';
+let currentTheme = localStorage.getItem('piEdge_theme') || 'modern';
+
+window.changeTheme = function(theme) {
+    currentTheme = theme;
+    localStorage.setItem('piEdge_theme', theme);
+    applyTheme(theme);
+    refreshAllData();
+};
+
+window.changeLanguage = function(lang) {
+    currentLang = lang;
+    localStorage.setItem('piEdge_lang', lang);
+    applyLanguage(lang);
+    refreshAllData();
+};
+
+function applyTheme(theme) {
+    document.body.className = `theme-${theme}`;
+}
+
+function applyLanguage(lang) {
+    document.querySelectorAll('[data-i18n]').forEach(el => {
+        const key = el.getAttribute('data-i18n');
+        if (i18n[lang] && i18n[lang][key]) {
+            if (el.tagName === 'INPUT') {
+                if (el.placeholder) {
+                    el.placeholder = i18n[lang][key];
+                }
+            } else if (el.tagName === 'OPTION') {
+                el.textContent = i18n[lang][key];
+            } else {
+                el.innerHTML = i18n[lang][key];
+            }
+        }
+    });
+}
+
+function t(key, defaultValue = "") {
+    if (i18n[currentLang] && i18n[currentLang][key]) {
+        return i18n[currentLang][key];
+    }
+    return defaultValue || key;
+}
+
 let devices = [];
 let activeDeviceId = '';
 let activeLibraryScreen = 1;
@@ -19,12 +312,21 @@ const toastEl = document.getElementById('toast');
 
 // Initialize App
 document.addEventListener('DOMContentLoaded', () => {
+    // Apply theme and language configs
+    applyTheme(currentTheme);
+    applyLanguage(currentLang);
+    
+    const themeSelect = document.getElementById('theme-select');
+    if (themeSelect) themeSelect.value = currentTheme;
+    const langSelect = document.getElementById('lang-select');
+    if (langSelect) langSelect.value = currentLang;
+
     setupTabNavigation();
     setupUploadZone();
     setupSettingsForm();
     
     document.getElementById('btn-refresh').addEventListener('click', () => {
-        showToast("Menyegarkan data...");
+        showToast(t('toast_refreshing', 'Menyegarkan data...'));
         refreshAllData();
     });
 
@@ -34,12 +336,12 @@ document.addEventListener('DOMContentLoaded', () => {
         previewToggle.addEventListener('change', (e) => {
             autoPreview = e.target.checked;
             if (autoPreview) {
-                showToast("Auto preview diaktifkan (5s)");
+                showToast(t('toast_autopreview_on', 'Auto preview diaktifkan (5s)'));
                 refreshScreenshots();
                 if (screenshotInterval) clearInterval(screenshotInterval);
                 screenshotInterval = setInterval(refreshScreenshots, 5000);
             } else {
-                showToast("Auto preview dimatikan");
+                showToast(t('toast_autopreview_off', 'Auto preview dimatikan'));
                 if (screenshotInterval) {
                     clearInterval(screenshotInterval);
                     screenshotInterval = null;
@@ -157,7 +459,7 @@ function selectDevice(id) {
         activeDeviceIp.textContent = `${device.ip}:${device.port}`;
         
         globalStatusDot.className = "dot offline";
-        globalStatusText.textContent = "Connecting...";
+        globalStatusText.textContent = t('connecting', 'Connecting...');
         
         // Immediate fetch
         refreshAllData();
@@ -223,7 +525,7 @@ async function fetchActiveDeviceStatus() {
         
         // Update status header
         globalStatusDot.className = "dot online";
-        globalStatusText.textContent = `Online - ${data.system.uptime}`;
+        globalStatusText.textContent = `${t('status_online', 'Online')} - ${data.system.uptime}`;
         
         // Update screen components
         audioConfig = data.audio || {};
@@ -239,13 +541,13 @@ async function fetchActiveDeviceStatus() {
     } catch (e) {
         console.error("Gagal kontak ke device active status:", e);
         globalStatusDot.className = "dot offline";
-        globalStatusText.textContent = "Offline (Connection Lost)";
+        globalStatusText.textContent = `${t('status_offline', 'Offline')} (${t('connection_lost', 'Connection Lost')})`;
         
         // Mark screens as offline
         document.getElementById('s1-status-badge').className = "badge badge-error";
-        document.getElementById('s1-status-badge').textContent = "Offline";
+        document.getElementById('s1-status-badge').textContent = t('status_offline', 'Offline');
         document.getElementById('s2-status-badge').className = "badge badge-error";
-        document.getElementById('s2-status-badge').textContent = "Offline";
+        document.getElementById('s2-status-badge').textContent = t('status_offline', 'Offline');
     }
 }
 
@@ -263,7 +565,7 @@ function updateScreenControlUI(screenNum, data, audioData) {
 
     if (audioData) {
         const isMuted = audioData.global_mute;
-        muteBtn.textContent = isMuted ? "🔇 Muted" : "🔊 Audio ON";
+        muteBtn.textContent = isMuted ? t('opt_muted', '🔇 Muted') : t('opt_audio_on', '🔊 Audio ON');
         muteBtn.className = isMuted ? "btn btn-sm btn-secondary" : "btn btn-sm btn-primary";
         if (document.activeElement !== routeSelect) {
             routeSelect.value = audioData.output_device || "hdmi";
@@ -277,10 +579,10 @@ function updateScreenControlUI(screenNum, data, audioData) {
     // Service active status
     if (data.service_active) {
         statusBadge.className = "badge badge-success";
-        statusBadge.textContent = data.mpv_connected ? "Playing" : "Active (No MPV)";
+        statusBadge.textContent = data.mpv_connected ? t('status_playing', 'Playing') : t('status_active_no_mpv', 'Active (No MPV)');
     } else {
         statusBadge.className = "badge badge-error";
-        statusBadge.textContent = "Service Inactive";
+        statusBadge.textContent = t('status_service_inactive', 'Service Inactive');
     }
 
     // Play/Pause button symbol
@@ -288,7 +590,7 @@ function updateScreenControlUI(screenNum, data, audioData) {
     playBtn.dataset.paused = data.paused;
 
     // Playing title
-    titleEl.textContent = data.playing_file !== "None" ? data.playing_file : "Daftar putar kosong / Berhenti";
+    titleEl.textContent = data.playing_file !== "None" ? data.playing_file : t('no_media', 'Daftar putar kosong / Berhenti');
 
     // Progress Bar & Time
     if (data.duration > 0) {
@@ -343,7 +645,7 @@ function refreshScreenshots() {
 function refreshSingleScreenshot(screen) {
     const dev = getActiveDevice();
     if (!dev || globalStatusDot.classList.contains('offline')) {
-        showToast("Perangkat offline, tidak bisa mengambil preview", true);
+        showToast(t('toast_device_offline_preview', 'Perangkat offline, tidak bisa mengambil preview'), true);
         return;
     }
 
@@ -358,7 +660,7 @@ function refreshSingleScreenshot(screen) {
         sImg.style.opacity = '1';
     };
     
-    showToast(`Mengambil tangkapan layar baru untuk Layar ${screen}...`);
+    showToast(t('toast_capturing_screenshot', 'Mengambil tangkapan layar baru untuk Layar {screen}...').replace('{screen}', screen));
 }
 
 // Send Remote control actions
@@ -373,13 +675,13 @@ async function controlDevice(screen, action) {
         
         const data = await res.json();
         if (data.success) {
-            showToast(`${action.replace('_', ' ')} berhasil dikirim`);
+            showToast(t('toast_command_sent', 'Perintah berhasil dikirim'));
             fetchActiveDeviceStatus();
         } else {
-            showToast(`Gagal: ${data.error}`, true);
+            showToast(t('toast_command_fail', 'Gagal: {error}').replace('{error}', data.error), true);
         }
     } catch (e) {
-        showToast("Error mengirim perintah kontrol", true);
+        showToast(t('toast_command_error', 'Error mengirim perintah kontrol'), true);
     }
 }
 
@@ -553,13 +855,13 @@ async function savePlaylistOrder() {
 
         const data = await res.json();
         if (data.success) {
-            showToast("Urutan playlist berhasil disimpan!");
+            showToast(t('toast_playlist_saved', 'Urutan playlist berhasil disimpan!'));
             fetchActiveDeviceStatus();
         } else {
-            showToast(`Gagal menyimpan: ${data.error}`, true);
+            showToast(t('toast_playlist_save_fail', 'Gagal menyimpan: {error}').replace('{error}', data.error), true);
         }
     } catch (e) {
-        showToast("Error menghubungi server untuk playlist", true);
+        showToast(t('toast_playlist_error', 'Error menghubungi server untuk playlist'), true);
     }
 }
 
@@ -622,17 +924,17 @@ function setupUploadZone() {
 
         xhr.addEventListener('load', () => {
             if (xhr.status === 200) {
-                showToast("File berhasil diunggah!");
+                showToast(t('toast_upload_success', 'File berhasil diunggah!'));
                 setTimeout(() => progressWrapper.classList.add('hidden'), 1000);
                 fetchActiveDeviceStatus();
             } else {
-                showToast("Gagal mengunggah file!", true);
+                showToast(t('toast_upload_fail', 'Gagal mengunggah file!'), true);
                 setTimeout(() => progressWrapper.classList.add('hidden'), 2000);
             }
         });
 
         xhr.addEventListener('error', () => {
-            showToast("Koneksi gagal saat mengunggah file", true);
+            showToast(t('toast_upload_error', 'Koneksi gagal saat mengunggah file'), true);
             progressWrapper.classList.add('hidden');
         });
 
@@ -644,7 +946,10 @@ function setupUploadZone() {
 
 // Delete media asset
 async function deleteVideoFile(filename) {
-    if (!confirm(`Apakah Anda yakin ingin menghapus "${filename}" dari Layar ${activeLibraryScreen}?`)) {
+    const msg = t('confirm_delete_video', 'Apakah Anda yakin ingin menghapus "{filename}" dari Layar {screen}?')
+        .replace('{filename}', filename)
+        .replace('{screen}', activeLibraryScreen);
+    if (!confirm(msg)) {
         return;
     }
 
@@ -661,13 +966,13 @@ async function deleteVideoFile(filename) {
 
         const data = await res.json();
         if (data.success) {
-            showToast("Video berhasil dihapus");
+            showToast(t('toast_video_deleted', 'Video berhasil dihapus'));
             fetchActiveDeviceStatus();
         } else {
-            showToast(`Gagal: ${data.error}`, true);
+            showToast(t('toast_command_fail', 'Gagal: {error}').replace('{error}', data.error), true);
         }
     } catch (e) {
-        showToast("Error saat menghapus video", true);
+        showToast(t('toast_command_error', 'Error saat menghapus video'), true);
     }
 }
 
@@ -690,7 +995,7 @@ function setupSettingsForm() {
         localStorage.setItem('museum_signage_devices', JSON.stringify(devices));
         
         form.reset();
-        showToast(`Perangkat "${name}" ditambahkan`);
+        showToast(t('toast_device_added', 'Perangkat "{name}" ditambahkan').replace('{name}', name));
         
         loadDevices(); // Refresh list and dropdown
     });
@@ -718,13 +1023,14 @@ function deleteRegisteredDevice(id) {
     const device = devices.find(d => d.id === id);
     if (!device) return;
 
-    if (!confirm(`Hapus perangkat "${device.name}" dari daftar kontrol?`)) {
+    const msg = t('confirm_delete_device', 'Hapus perangkat "{name}" dari daftar kontrol?').replace('{name}', device.name);
+    if (!confirm(msg)) {
         return;
     }
 
     devices = devices.filter(d => d.id !== id);
     localStorage.setItem('museum_signage_devices', JSON.stringify(devices));
-    showToast("Perangkat dihapus");
+    showToast(t('toast_device_deleted', 'Perangkat dihapus'));
     
     // If active device was deleted, switch to first remaining
     if (activeDeviceId === id && devices.length > 0) {
@@ -766,11 +1072,14 @@ async function toggleGlobalMute(screen) {
         });
         const data = await res.json();
         if (data.success) {
-            showToast(`Audio Layar ${screen} ${!currentMute ? 'Dimatikan' : 'Dihidupkan'}`);
+            const msg = !currentMute ? 
+                t('toast_audio_muted', 'Audio Layar {screen} Dimatikan').replace('{screen}', screen) :
+                t('toast_audio_unmuted', 'Audio Layar {screen} Dihidupkan').replace('{screen}', screen);
+            showToast(msg);
             fetchActiveDeviceStatus();
         }
     } catch (e) {
-        showToast("Gagal mengubah status audio", true);
+        showToast(t('toast_command_error', 'Gagal mengubah status audio'), true);
     }
 }
 
@@ -796,11 +1105,13 @@ async function changeAudioRoute(screen) {
         });
         const data = await res.json();
         if (data.success) {
-            showToast(`Output Audio Layar ${screen} dialihkan ke ${newRoute.toUpperCase()}`);
+            showToast(t('toast_audio_route_changed', 'Output Audio Layar {screen} dialihkan ke {route}')
+                .replace('{screen}', screen)
+                .replace('{route}', newRoute.toUpperCase()));
             fetchActiveDeviceStatus();
         }
     } catch (e) {
-        showToast("Gagal mengubah rute audio", true);
+        showToast(t('toast_command_error', 'Gagal mengubah rute audio'), true);
     }
 }
 
@@ -826,11 +1137,13 @@ async function changeAudioChannel(screen) {
         });
         const data = await res.json();
         if (data.success) {
-            showToast(`Channel Audio Layar ${screen} diubah ke ${newChannel.toUpperCase()}`);
+            showToast(t('toast_audio_channel_changed', 'Channel Audio Layar {screen} diubah ke {channel}')
+                .replace('{screen}', screen)
+                .replace('{channel}', newChannel.toUpperCase()));
             fetchActiveDeviceStatus();
         }
     } catch (e) {
-        showToast("Gagal mengubah channel audio", true);
+        showToast(t('toast_command_error', 'Gagal mengubah channel audio'), true);
     }
 }
 
@@ -852,10 +1165,13 @@ async function toggleClipMute(filename) {
         });
         const data = await res.json();
         if (data.success) {
-            showToast(`Audio klip "${filename}" ${!currentMute ? 'Dimatikan' : 'Dihidupkan'}`);
+            const msg = !currentMute ?
+                t('toast_clip_muted', 'Audio klip "{filename}" Dimatikan').replace('{filename}', filename) :
+                t('toast_clip_unmuted', 'Audio klip "{filename}" Dihidupkan').replace('{filename}', filename);
+            showToast(msg);
             fetchActiveDeviceStatus();
         }
     } catch (e) {
-        showToast("Gagal mengubah status audio klip", true);
+        showToast(t('toast_command_error', 'Gagal mengubah status audio klip'), true);
     }
 }
