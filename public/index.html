@@ -104,7 +104,8 @@
                             <h2 data-i18n="active_control">Kontrol Layar Aktif</h2>
                             <p data-i18n="active_control_sub">Kelola pemutaran video secara real-time pada monitor HDMI</p>
                         </div>
-                        <div class="toggle-preview-wrapper">
+                        <div class="toggle-preview-wrapper" style="display: flex; gap: 15px; align-items: center;">
+                            <button class="btn btn-danger" onclick="shutdownSystem()" data-i18n="btn_shutdown" title="Matikan Pi sepenuhnya">🔌 Shutdown Pi</button>
                             <span class="switch-label" data-i18n="auto_preview">Preview Otomatis (5d)</span>
                             <label class="switch">
                                 <input type="checkbox" id="preview-toggle">

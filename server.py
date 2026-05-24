@@ -118,8 +118,11 @@ def check_schedules():
             now = datetime.now(tz)
             
             curr_time = now.strftime("%H:%M")
-            # Convert python day string to matching short English name used in UI (e.g. 'Mon')
-            curr_day = now.strftime("%a")
+            # Locale-independent mapping
+            days_map = {0: 'Mon', 1: 'Tue', 2: 'Wed', 3: 'Thu', 4: 'Fri', 5: 'Sat', 6: 'Sun'}
+            curr_day = days_map[now.weekday()]
+            
+            changed = False
             
             for event in data.get("events", []):
                 if not event.get("enabled", True):
@@ -132,6 +135,7 @@ def check_schedules():
                         continue
                         
                     event["_last_triggered"] = now.strftime("%Y-%m-%d %H:%M")
+                    changed = True
                     print(f"[Schedule] Triggering Event {event.get('id')} - {event.get('type')}")
                     
                     if event.get("type") == "power":
@@ -167,8 +171,9 @@ def check_schedules():
                         except Exception as e:
                             print(f"[Schedule] Playlist error: {e}")
                             
-            with open(SCHEDULES_FILE, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2)
+            if changed:
+                with open(SCHEDULES_FILE, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, indent=2)
                 
         except Exception as e:
             pass # Suppress file read/write errors if they occur concurrently
@@ -441,6 +446,8 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
             self.handle_api_schedule_save()
         elif path == '/api/playlists/save_all':
             self.handle_api_playlists_save_all()
+        elif path == '/api/system/shutdown':
+            self.handle_api_system_shutdown()
         else:
             self.send_error(404, "Endpoint Not Found")
 
@@ -941,6 +948,20 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self.send_error(500, str(e))
 
+    def handle_api_system_shutdown(self):
+        res = {"success": True, "message": "System is shutting down"}
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_cors_headers()
+        self.end_headers()
+        self.wfile.write(json.dumps(res).encode('utf-8'))
+        
+        # Shutdown after responding
+        def run_shutdown():
+            time.sleep(1)
+            if IS_PI:
+                subprocess.run("sudo shutdown -h now", shell=True)
+        threading.Thread(target=run_shutdown, daemon=True).start()
 
 def run_server(port=8080):
     server_address = ('', port)

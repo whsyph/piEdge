@@ -148,7 +148,9 @@ const i18n = {
         btn_save: "Simpan Jadwal",
         select_playlist_label: "Pilih Playlist:",
         toast_conflict: "Konflik: Jadwal sudah ada di waktu tersebut!",
-        confirm_delete_schedule: "Hapus jadwal ini?"
+        confirm_delete_schedule: "Hapus jadwal ini?",
+        btn_shutdown: "🔌 Shutdown Pi",
+        confirm_shutdown: "PERINGATAN: Apakah Anda yakin ingin mematikan (Shutdown) Raspberry Pi ini? Pi akan mati dan Anda harus mencabut-colok kabel daya atau menekan tombol fisik secara manual untuk menyalakannya kembali!"
     },
     en: {
         brand_name: "caPiBarra",
@@ -298,7 +300,9 @@ const i18n = {
         btn_save: "Save Schedule",
         select_playlist_label: "Select Playlist:",
         toast_conflict: "Conflict: A schedule already exists at this time!",
-        confirm_delete_schedule: "Delete this schedule?"
+        confirm_delete_schedule: "Delete this schedule?",
+        btn_shutdown: "🔌 Shutdown Pi",
+        confirm_shutdown: "WARNING: Are you sure you want to shutdown this Raspberry Pi? It will power off, and you must manually reconnect power to turn it back on!"
     }
 };
 
@@ -1481,6 +1485,21 @@ async function saveSchedulesData() {
         }
     } catch(e) {
         showToast("Error menghubungi server", true);
+    }
+}
+
+window.shutdownSystem = async function() {
+    if(!confirm(t('confirm_shutdown', 'WARNING: Shutdown Pi?'))) return;
+    
+    try {
+        const res = await fetch(getApiUrl('/api/system/shutdown'), { method: 'POST' });
+        if(res.ok) {
+            showToast("Perintah Shutdown berhasil dikirim. Alat akan mati dalam 1 detik.");
+        } else {
+            showToast("Gagal mengirim perintah shutdown", true);
+        }
+    } catch (e) {
+        showToast("Error jaringan saat mengirim shutdown", true);
     }
 }
 
