@@ -141,12 +141,15 @@ def check_schedules():
                     if event.get("type") == "power":
                         action = event.get("action")
                         if action == "sleep":
-                            if IS_PI: subprocess.run("sudo -u pi XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 wlr-randr --output HDMI-A-1 --off --output HDMI-A-2 --off", shell=True)
+                            if IS_PI:
+                                subprocess.run("sudo systemctl stop layar1.service layar2.service", shell=True)
+                                time.sleep(1)
+                                subprocess.run("sudo -u pi XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 wlr-randr --output HDMI-A-1 --off --output HDMI-A-2 --off", shell=True)
                         elif action == "wake":
                             if IS_PI: 
                                 subprocess.run("sudo -u pi XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 wlr-randr --output HDMI-A-1 --on --output HDMI-A-2 --on", shell=True)
                                 time.sleep(2)
-                                subprocess.run("sudo systemctl restart layar1.service layar2.service", shell=True)
+                                subprocess.run("sudo systemctl start layar1.service layar2.service", shell=True)
                                 
                     elif event.get("type") == "playlist":
                         screen = int(event.get("screen", 1))
