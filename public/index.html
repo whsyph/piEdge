@@ -432,24 +432,49 @@
                 <!-- TAB 5: CONFIG TAMPILAN -->
                 <div id="tab-config" class="tab-panel">
                     <div class="section-header">
-                        <h2 data-i18n="config_header">Konfigurasi Tampilan & Bahasa</h2>
-                        <p data-i18n="config_sub">Sesuaikan tema warna preset dan bahasa antarmuka aplikasi</p>
+                        <h2 data-i18n="config_header">Konfigurasi Sistem & Tampilan</h2>
+                        <p data-i18n="config_sub">Sesuaikan tema warna preset, bahasa antarmuka, dan jalur koneksi jaringan</p>
                     </div>
 
-                    <div class="config-card">
-                        <div class="form-group">
-                            <label for="theme-select" data-i18n="theme_select_label">Preset Warna (Skin):</label>
-                            <select id="theme-select" class="form-select" onchange="changeTheme(this.value)">
-                                <option value="modern">✨ Modern Dark</option>
-                                <option value="retro">📻 Retro Cyber</option>
-                            </select>
+                    <div style="display: flex; gap: 32px; flex-wrap: wrap; justify-content: flex-start;">
+                        <div class="config-card" style="margin: 0; flex: 1; min-width: 300px; max-width: 500px;">
+                            <h3 style="margin-bottom: 20px; font-size: 16px; font-weight: 600; border-bottom: 1px solid var(--border-color); padding-bottom: 12px;" data-i18n="ui_settings_title">🎨 Tampilan & Bahasa</h3>
+                            <div class="form-group">
+                                <label for="theme-select" data-i18n="theme_select_label">Preset Warna (Skin):</label>
+                                <select id="theme-select" class="form-select" onchange="changeTheme(this.value)">
+                                    <option value="modern">✨ Modern Dark</option>
+                                    <option value="retro">📻 Retro Cyber</option>
+                                </select>
+                            </div>
+                            <div class="form-group margin-top-md">
+                                <label for="lang-select" data-i18n="lang_select_label">Bahasa Antarmuka (Language):</label>
+                                <select id="lang-select" class="form-select" onchange="changeLanguage(this.value)">
+                                    <option value="id">🇮🇩 Indonesia</option>
+                                    <option value="en">🇬🇧 English</option>
+                                </select>
+                            </div>
                         </div>
-                        <div class="form-group margin-top-md">
-                            <label for="lang-select" data-i18n="lang_select_label">Bahasa Antarmuka (Language):</label>
-                            <select id="lang-select" class="form-select" onchange="changeLanguage(this.value)">
-                                <option value="id">🇮🇩 Indonesia</option>
-                                <option value="en">🇬🇧 English</option>
-                            </select>
+
+                        <div class="config-card" style="margin: 0; flex: 1; min-width: 300px; max-width: 500px;">
+                            <h3 style="margin-bottom: 20px; font-size: 16px; font-weight: 600; border-bottom: 1px solid var(--border-color); padding-bottom: 12px;" data-i18n="network_settings_title">🌐 Jalur Jaringan</h3>
+                            <div class="form-group">
+                                <label for="network-select" data-i18n="network_select_label">Pilih Antarmuka Aktif:</label>
+                                <select id="network-select" class="form-select">
+                                    <option value="eth" data-i18n="opt_eth">Ethernet (ETH)</option>
+                                    <option value="wlan" data-i18n="opt_wlan">Wi-Fi (WLAN)</option>
+                                </select>
+                            </div>
+                            <div class="form-group margin-top-md" id="network-status-info" style="font-size: 13px; color: var(--text-muted); line-height: 1.5;">
+                                <div style="display:flex; justify-content:space-between; margin-bottom: 8px;">
+                                    <span>ETH Status:</span>
+                                    <strong id="net-eth-status" style="color: var(--text-main); text-align: right;">-</strong>
+                                </div>
+                                <div style="display:flex; justify-content:space-between;">
+                                    <span>WLAN Status:</span>
+                                    <strong id="net-wlan-status" style="color: var(--text-main); text-align: right;">-</strong>
+                                </div>
+                            </div>
+                            <button id="btn-save-network" class="btn btn-primary margin-top-md" style="width: 100%;" onclick="saveNetworkConfig()" data-i18n="btn_save_network">💾 Terapkan Jaringan</button>
                         </div>
                     </div>
                 </div>

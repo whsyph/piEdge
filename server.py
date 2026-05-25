@@ -27,6 +27,7 @@ else:
 
 SCHEDULES_FILE = os.path.join(os.path.dirname(__file__), 'public', 'schedules.json')
 PLAYLISTS_FILE = os.path.join(os.path.dirname(__file__), 'public', 'playlists.json')
+NETWORK_CONFIG_FILE = os.path.join(os.path.dirname(__file__), 'public', 'network_config.json')
 
 # Ensure video directories exist
 os.makedirs(VIDEO_DIR_1, exist_ok=True)
@@ -46,7 +47,83 @@ def init_json_files():
         with open(PLAYLISTS_FILE, 'w', encoding='utf-8') as f:
             json.dump(default_playlists, f, indent=2)
 
+    if not os.path.exists(NETWORK_CONFIG_FILE):
+        default_network = {"selected": "eth"}
+        with open(NETWORK_CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(default_network, f, indent=2)
+
+def get_network_interfaces():
+    if not IS_PI:
+        return ["eth0"], ["wlan0"]
+    try:
+        interfaces = os.listdir('/sys/class/net/')
+        eth_list = [i for i in interfaces if i.startswith(('eth', 'en'))]
+        wlan_list = [i for i in interfaces if i.startswith(('wlan', 'wl'))]
+        return eth_list, wlan_list
+    except Exception:
+        return [], []
+
+def get_interface_ip(ifname):
+    if not IS_PI:
+        return "192.168.88.46" if "eth" in ifname else "192.168.88.100"
+    try:
+        res = subprocess.run(["ip", "addr", "show", ifname], capture_output=True, text=True)
+        for line in res.stdout.split('\n'):
+            line = line.strip()
+            if line.startswith("inet "):
+                return line.split()[1].split('/')[0]
+    except Exception:
+        pass
+    return None
+
+def get_interface_status(ifname):
+    ip = get_interface_ip(ifname)
+    operstate = "down"
+    if IS_PI:
+        try:
+            with open(f"/sys/class/net/{ifname}/operstate", "r") as f:
+                operstate = f.read().strip()
+        except Exception:
+            pass
+    else:
+        operstate = "up"
+    return {
+        "name": ifname,
+        "ip": ip if ip else "Not Connected",
+        "status": operstate
+    }
+
+def apply_network_config():
+    if not os.path.exists(NETWORK_CONFIG_FILE):
+        return
+    try:
+        with open(NETWORK_CONFIG_FILE, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+        selected = config.get("selected", "eth")
+        
+        eth_ifs, wlan_ifs = get_network_interfaces()
+        
+        if not IS_PI:
+            print(f"[Network Mock] Applying {selected}: eth_ifs={eth_ifs}, wlan_ifs={wlan_ifs}")
+            return
+            
+        if selected == "eth":
+            # Enable ETH, disable WLAN
+            for eth in eth_ifs:
+                subprocess.run(f"sudo ip link set dev {eth} up", shell=True)
+            for wl in wlan_ifs:
+                subprocess.run(f"sudo ip link set dev {wl} down", shell=True)
+        elif selected == "wlan":
+            # Enable WLAN, disable ETH
+            for wl in wlan_ifs:
+                subprocess.run(f"sudo ip link set dev {wl} up", shell=True)
+            for eth in eth_ifs:
+                subprocess.run(f"sudo ip link set dev {eth} down", shell=True)
+    except Exception as e:
+        print(f"[Network] Error applying network config: {e}")
+
 init_json_files()
+apply_network_config()
 
 # Generate default playlist if it doesn't exist
 def init_playlist_file(video_dir):
@@ -394,6 +471,10 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
         elif path == '/api/playlists/list':
             self.handle_api_playlists_list()
             return
+            
+        elif path == '/api/network/config':
+            self.handle_api_network_config()
+            return
 
         # --- Static Files Router ---
         if path == '/':
@@ -456,6 +537,8 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
             self.handle_api_playlists_save_all()
         elif path == '/api/system/shutdown':
             self.handle_api_system_shutdown()
+        elif path == '/api/network/save':
+            self.handle_api_network_save()
         else:
             self.send_error(404, "Endpoint Not Found")
 
@@ -970,6 +1053,56 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
             if IS_PI:
                 subprocess.run("sudo shutdown -h now", shell=True)
         threading.Thread(target=run_shutdown, daemon=True).start()
+
+    def handle_api_network_config(self):
+        try:
+            with open(NETWORK_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            eth_ifs, wlan_ifs = get_network_interfaces()
+            eth_status = [get_interface_status(eth) for eth in eth_ifs]
+            wlan_status = [get_interface_status(wl) for wl in wlan_ifs]
+            
+            response_data = {
+                "selected": data.get("selected", "eth"),
+                "interfaces": {
+                    "eth": eth_status,
+                    "wlan": wlan_status
+                }
+            }
+            
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_cors_headers()
+            self.end_headers()
+            self.wfile.write(json.dumps(response_data).encode('utf-8'))
+        except Exception as e:
+            self.send_error(500, str(e))
+
+    def handle_api_network_save(self):
+        content_length = int(self.headers.get('Content-Length', 0))
+        post_data = self.rfile.read(content_length).decode('utf-8')
+        try:
+            params = json.loads(post_data)
+            selected = params.get("selected", "eth")
+            
+            with open(NETWORK_CONFIG_FILE, 'w', encoding='utf-8') as f:
+                json.dump({"selected": selected}, f, indent=2)
+            
+            def do_apply():
+                time.sleep(0.5)
+                apply_network_config()
+                
+            threading.Thread(target=do_apply, daemon=True).start()
+            
+            res = {"success": True, "message": f"Network path saved. Applying {selected.upper()}..."}
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_cors_headers()
+            self.end_headers()
+            self.wfile.write(json.dumps(res).encode('utf-8'))
+        except Exception as e:
+            self.send_error(500, str(e))
 
 def run_server(port=8080):
     server_address = ('', port)

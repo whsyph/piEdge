@@ -117,11 +117,19 @@ const i18n = {
         toast_audio_channel_changed: "Channel Audio Layar {screen} diubah ke {channel}",
         toast_clip_muted: "Audio klip \"{filename}\" Dimatikan",
         toast_clip_unmuted: "Audio klip \"{filename}\" Dihidupkan",
-        nav_config: "🎨 Tampilan & Bahasa",
-        config_header: "Konfigurasi Tampilan & Bahasa",
-        config_sub: "Sesuaikan tema warna preset dan bahasa antarmuka aplikasi",
+        nav_config: "🔧 Konfigurasi",
+        config_header: "Konfigurasi Sistem & Tampilan",
+        config_sub: "Sesuaikan tema warna preset, bahasa antarmuka, dan jalur koneksi jaringan",
         theme_select_label: "Preset Warna (Skin):",
         lang_select_label: "Bahasa Antarmuka (Language):",
+        ui_settings_title: "🎨 Tampilan & Bahasa",
+        network_settings_title: "🌐 Jalur Jaringan",
+        network_select_label: "Pilih Antarmuka Aktif:",
+        opt_eth: "Ethernet (ETH)",
+        opt_wlan: "Wi-Fi (WLAN)",
+        btn_save_network: "💾 Terapkan Jaringan",
+        toast_network_saved: "Jalur jaringan berhasil diubah ke {interface}!",
+        confirm_change_network: "PERINGATAN: Mengubah jalur jaringan akan mematikan antarmuka yang tidak terpilih. Jika Anda terhubung menggunakan antarmuka tersebut, koneksi Anda ke CMS ini akan terputus! Apakah Anda yakin ingin melanjutkan?",
         nav_schedule: "📅 Penjadwalan",
         schedule_header: "Jadwal Operasional",
         schedule_sub: "Atur jam hidup/mati otomatis dan jadwal pergantian playlist layar",
@@ -269,11 +277,19 @@ const i18n = {
         toast_audio_channel_changed: "Screen {screen} audio channel changed to {channel}",
         toast_clip_muted: "Clip \"{filename}\" audio muted",
         toast_clip_unmuted: "Clip \"{filename}\" audio enabled",
-        nav_config: "🎨 UI Settings",
-        config_header: "UI & Language Configuration",
-        config_sub: "Customize color theme presets and interface language",
+        nav_config: "🔧 Configuration",
+        config_header: "System & UI Configuration",
+        config_sub: "Customize color theme presets, interface language, and network connection path",
         theme_select_label: "Color Preset (Skin):",
         lang_select_label: "Interface Language:",
+        ui_settings_title: "🎨 Presentation & Language",
+        network_settings_title: "🌐 Network Interface",
+        network_select_label: "Select Active Interface:",
+        opt_eth: "Ethernet (ETH)",
+        opt_wlan: "Wi-Fi (WLAN)",
+        btn_save_network: "💾 Apply Network",
+        toast_network_saved: "Network path successfully changed to {interface}!",
+        confirm_change_network: "WARNING: Changing the network path will disable the unselected interface. If you are connected using that interface, your connection to this CMS will be lost! Are you sure you want to proceed?",
         nav_schedule: "📅 Scheduling",
         schedule_header: "Operational Schedule",
         schedule_sub: "Configure automatic power on/off and screen playlist changes",
@@ -443,6 +459,8 @@ function setupTabNavigation() {
                     if (screenshotInterval) clearInterval(screenshotInterval);
                     screenshotInterval = setInterval(refreshScreenshots, 5000);
                 }
+            } else if (targetTab === 'config') {
+                fetchNetworkConfig();
             } else {
                 // Stop screenshot polling if leaving control tab
                 if (screenshotInterval) {
@@ -467,6 +485,10 @@ async function loadDevices() {
         console.warn("Gagal memuat devices.json dari server, memakai fallback local storage", e);
     }
 
+    // Filter out deleted server-defined devices
+    const deletedIds = JSON.parse(localStorage.getItem('museum_signage_deleted_devices') || '[]');
+    devices = devices.filter(d => !deletedIds.includes(d.id));
+
     // Merge with localStorage overrides
     const localOverride = localStorage.getItem('museum_signage_devices');
     if (localOverride) {
@@ -474,6 +496,7 @@ async function loadDevices() {
             const parsed = JSON.parse(localOverride);
             // Merge: keep local overrides, add new ones
             parsed.forEach(ld => {
+                if (deletedIds.includes(ld.id)) return; // skip deleted
                 const idx = devices.findIndex(d => d.id === ld.id);
                 if (idx !== -1) {
                     devices[idx] = ld;
@@ -567,6 +590,7 @@ function refreshAllData() {
     fetchActiveDeviceStatus();
     refreshScreenshots(); // Fetch screenshots once on manual/device refresh
     updateOverviewGrid();
+    fetchNetworkConfig();
 }
 
 // Fetch active device details
@@ -1110,6 +1134,13 @@ function deleteRegisteredDevice(id) {
         return;
     }
 
+    // Add to deleted IDs list
+    const deletedIds = JSON.parse(localStorage.getItem('museum_signage_deleted_devices') || '[]');
+    if (!deletedIds.includes(id)) {
+        deletedIds.push(id);
+        localStorage.setItem('museum_signage_deleted_devices', JSON.stringify(deletedIds));
+    }
+
     devices = devices.filter(d => d.id !== id);
     localStorage.setItem('museum_signage_devices', JSON.stringify(devices));
     showToast(t('toast_device_deleted', 'Perangkat dihapus'));
@@ -1502,4 +1533,81 @@ window.shutdownSystem = async function() {
         showToast("Error jaringan saat mengirim shutdown", true);
     }
 }
+
+async function fetchNetworkConfig() {
+    const activeTab = document.querySelector('.nav-btn.active').getAttribute('data-tab');
+    if (activeTab !== 'config') return;
+
+    try {
+        const url = getApiUrl('/api/network/config');
+        const res = await fetch(url);
+        if (res.ok) {
+            const data = await res.json();
+            
+            const netSelect = document.getElementById('network-select');
+            if (netSelect && document.activeElement !== netSelect) {
+                netSelect.value = data.selected || "eth";
+            }
+            
+            const ethStatusEl = document.getElementById('net-eth-status');
+            const wlanStatusEl = document.getElementById('net-wlan-status');
+            
+            if (ethStatusEl && data.interfaces.eth) {
+                const ethInfo = data.interfaces.eth.map(i => `${i.name}: ${i.ip} (${i.status.toUpperCase()})`).join('<br>');
+                ethStatusEl.innerHTML = ethInfo || 'None';
+            }
+            if (wlanStatusEl && data.interfaces.wlan) {
+                const wlanInfo = data.interfaces.wlan.map(i => `${i.name}: ${i.ip} (${i.status.toUpperCase()})`).join('<br>');
+                wlanStatusEl.innerHTML = wlanInfo || 'None';
+            }
+        }
+    } catch (e) {
+        console.error("Error fetching network config", e);
+    }
+}
+
+window.fetchNetworkConfig = fetchNetworkConfig;
+
+window.saveNetworkConfig = async function() {
+    const netSelect = document.getElementById('network-select');
+    if (!netSelect) return;
+    const selected = netSelect.value;
+    
+    const msg = t('confirm_change_network', 'PERINGATAN: Mengubah jalur jaringan akan mematikan antarmuka yang tidak terpilih. Jika Anda terhubung menggunakan antarmuka tersebut, koneksi Anda ke CMS ini akan terputus! Apakah Anda yakin ingin melanjutkan?');
+    if (!confirm(msg)) {
+        return;
+    }
+    
+    try {
+        const url = getApiUrl('/api/network/save');
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ selected })
+        });
+        
+        const data = await res.json();
+        if (data.success) {
+            showToast(t('toast_network_saved', 'Jalur jaringan berhasil diubah ke {interface}!').replace('{interface}', selected.toUpperCase()));
+            setTimeout(fetchNetworkConfig, 1000);
+        } else {
+            showToast("Gagal menyimpan jalur jaringan", true);
+        }
+    } catch (e) {
+        showToast("Error saat menghubungi server", true);
+    }
+};
+
+// Bind remaining inline onclick functions to window for global availability
+window.deleteVideoFile = deleteVideoFile;
+window.movePlaylistItem = movePlaylistItem;
+window.switchLibraryScreen = switchLibraryScreen;
+window.toggleClipMute = toggleClipMute;
+window.changeAudioChannel = changeAudioChannel;
+window.changeAudioRoute = changeAudioRoute;
+window.toggleGlobalMute = toggleGlobalMute;
+window.togglePlay = togglePlay;
+window.controlDevice = controlDevice;
+window.refreshSingleScreenshot = refreshSingleScreenshot;
+
 
