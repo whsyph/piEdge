@@ -158,6 +158,13 @@
                                         title="Selanjutnya">⏭️</button>
                                 </div>
 
+                                <div class="playlist-assignment" style="border-top: 1px solid var(--border-color); padding-top: 18px; margin-bottom: 18px;">
+                                     <h4 data-i18n="assigned_playlist_header" style="font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px;">Playlist Aktif</h4>
+                                     <select id="s1-select-assigned-playlist" class="form-select select-sm" style="width: 100%;" onchange="assignPlaylistToScreen(1, this.value)">
+                                         <!-- Dynamically populated -->
+                                     </select>
+                                </div>
+
                                 <div class="audio-controls">
                                     <h4 data-i18n="audio_control_header">Kontrol Audio</h4>
                                     <div class="audio-controls-grid">
@@ -191,13 +198,6 @@
                                         <button class="btn btn-sm btn-danger"
                                             onclick="controlDevice(1, 'stop_service')" data-i18n="btn_stop">Stop</button>
                                     </div>
-                                </div>
-
-                                <div class="playlist-assignment" style="border-top: 1px solid var(--border-color); padding-top: 18px;">
-                                     <h4 data-i18n="assigned_playlist_header" style="font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px;">Playlist Aktif</h4>
-                                     <select id="s1-select-assigned-playlist" class="form-select select-sm" style="width: 100%;" onchange="assignPlaylistToScreen(1, this.value)">
-                                         <!-- Dynamically populated -->
-                                     </select>
                                 </div>
                             </div>
                         </div>
@@ -242,6 +242,13 @@
                                         title="Selanjutnya">⏭️</button>
                                 </div>
 
+                                <div class="playlist-assignment" style="border-top: 1px solid var(--border-color); padding-top: 18px; margin-bottom: 18px;">
+                                     <h4 data-i18n="assigned_playlist_header" style="font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px;">Playlist Aktif</h4>
+                                     <select id="s2-select-assigned-playlist" class="form-select select-sm" style="width: 100%;" onchange="assignPlaylistToScreen(2, this.value)">
+                                         <!-- Dynamically populated -->
+                                     </select>
+                                </div>
+
                                 <div class="audio-controls">
                                     <h4 data-i18n="audio_control_header">Kontrol Audio</h4>
                                     <div class="audio-controls-grid">
@@ -275,13 +282,6 @@
                                         <button class="btn btn-sm btn-danger"
                                             onclick="controlDevice(2, 'stop_service')" data-i18n="btn_stop">Stop</button>
                                     </div>
-                                </div>
-
-                                <div class="playlist-assignment" style="border-top: 1px solid var(--border-color); padding-top: 18px;">
-                                     <h4 data-i18n="assigned_playlist_header" style="font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px;">Playlist Aktif</h4>
-                                     <select id="s2-select-assigned-playlist" class="form-select select-sm" style="width: 100%;" onchange="assignPlaylistToScreen(2, this.value)">
-                                         <!-- Dynamically populated -->
-                                     </select>
                                 </div>
                             </div>
                         </div>
