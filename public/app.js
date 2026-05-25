@@ -1381,15 +1381,6 @@ function renderPlaylistsUI() {
     Object.keys(playlists).forEach(pName => {
         const li = document.createElement('li');
         li.className = `playlist-item ${currentSelectedPlaylist === pName ? 'active' : ''}`;
-        li.style.cursor = 'pointer';
-        li.style.display = 'flex';
-        li.style.justifyContent = 'space-between';
-        li.style.alignItems = 'center';
-        li.style.padding = '10px 14px';
-        li.style.borderRadius = '6px';
-        li.style.marginBottom = '6px';
-        li.style.backgroundColor = currentSelectedPlaylist === pName ? 'var(--primary-light)' : 'rgba(255,255,255,0.05)';
-        li.style.border = currentSelectedPlaylist === pName ? '1px solid var(--primary)' : '1px solid transparent';
 
         li.addEventListener('click', (e) => {
             if (e.target.tagName !== 'BUTTON') {
