@@ -158,7 +158,16 @@ const i18n = {
         toast_conflict: "Konflik: Jadwal sudah ada di waktu tersebut!",
         confirm_delete_schedule: "Hapus jadwal ini?",
         btn_shutdown: "🔌 Shutdown Pi",
-        confirm_shutdown: "PERINGATAN: Apakah Anda yakin ingin mematikan (Shutdown) Raspberry Pi ini? Pi akan mati dan Anda harus mencabut-colok kabel daya atau menekan tombol fisik secara manual untuk menyalakannya kembali!"
+        confirm_shutdown: "PERINGATAN: Apakah Anda yakin ingin mematikan (Shutdown) Raspberry Pi ini? Pi akan mati dan Anda harus mencabut-colok kabel daya atau menekan tombol fisik secara manual untuk menyalakannya kembali!",
+        nav_playlists: "📋 Pengelola Playlist",
+        media_files_list_title: "Daftar Berkas Aset Video",
+        media_files_list_sub: "Semua video yang tersimpan di Raspberry Pi. Video-video ini dapat dimasukkan ke playlist mana saja.",
+        playlist_list_title: "Daftar Playlist",
+        playlist_compose_sub: "Pilih video di bawah untuk dimasukkan ke playlist, dan gunakan 🔼 / 🔽 untuk mengatur urutan putar.",
+        assigned_playlist_header: "Playlist Aktif",
+        toast_playlist_assigned: "Playlist {playlist} berhasil dipasang ke Layar {screen}!",
+        confirm_delete_playlist: "Apakah Anda yakin ingin menghapus playlist \"{playlistName}\"?",
+        confirm_delete_video_global: "Apakah Anda yakin ingin menghapus \"{filename}\"? Berkas ini akan dihapus permanen dari sistem dan dari semua playlist."
     },
     en: {
         brand_name: "caPiBarra",
@@ -318,7 +327,16 @@ const i18n = {
         toast_conflict: "Conflict: A schedule already exists at this time!",
         confirm_delete_schedule: "Delete this schedule?",
         btn_shutdown: "🔌 Shutdown Pi",
-        confirm_shutdown: "WARNING: Are you sure you want to shutdown this Raspberry Pi? It will power off, and you must manually reconnect power to turn it back on!"
+        confirm_shutdown: "WARNING: Are you sure you want to shutdown this Raspberry Pi? It will power off, and you must manually reconnect power to turn it back on!",
+        nav_playlists: "📋 Playlist Manager",
+        media_files_list_title: "Video Asset Files List",
+        media_files_list_sub: "All videos saved on the Raspberry Pi. These videos can be added to any playlist.",
+        playlist_list_title: "Playlist List",
+        playlist_compose_sub: "Select videos below to include in the playlist, and use 🔼 / 🔽 to adjust their playback order.",
+        assigned_playlist_header: "Active Playlist",
+        toast_playlist_assigned: "Playlist {playlist} successfully assigned to Screen {screen}!",
+        confirm_delete_playlist: "Are you sure you want to delete playlist \"{playlistName}\"?",
+        confirm_delete_video_global: "Are you sure you want to delete \"{filename}\"? This file will be permanently deleted from the system and all playlists."
     }
 };
 
@@ -461,6 +479,10 @@ function setupTabNavigation() {
                 }
             } else if (targetTab === 'config') {
                 fetchNetworkConfig();
+            } else if (targetTab === 'playlists') {
+                fetchPlaylistsAndSchedules().then(() => {
+                    renderPlaylistsUI();
+                });
             } else {
                 // Stop screenshot polling if leaving control tab
                 if (screenshotInterval) {
@@ -604,6 +626,7 @@ async function fetchActiveDeviceStatus() {
         if (!res.ok) throw new Error("Server error");
         
         const data = await res.json();
+        window.lastFetchedStatus = data;
         
         // Update status header
         globalStatusDot.className = "dot online";
@@ -617,8 +640,20 @@ async function fetchActiveDeviceStatus() {
         // Update diagnostics tab
         updateDiagnosticsUI(data.system);
         
-        // If library tab is visible, update playlist with all files
-        updateLibraryPlaylistUI(activeLibraryScreen === 1 ? data.screen1.all_files : data.screen2.all_files);
+        // Update Media Library UI using all_files
+        const allFiles = (data.screen1 && data.screen1.all_files) || [];
+        const playlist1 = (data.screen1 && data.screen1.playlist) || [];
+        const playlist2 = (data.screen2 && data.screen2.playlist) || [];
+        updateMediaLibraryUI(allFiles, playlist1, playlist2);
+
+        // Update Playlist Composition UI if in playlist tab
+        const activeTab = document.querySelector('.nav-btn.active')?.getAttribute('data-tab');
+        if (activeTab === 'playlists') {
+            syncPlaylistCompositionUI(allFiles);
+        }
+
+        // Fetch playlists/schedules to sync assignments
+        fetchPlaylistsAndSchedulesQuietly();
 
     } catch (e) {
         console.error("Gagal kontak ke device active status:", e);
@@ -841,133 +876,119 @@ async function updateOverviewGrid() {
     });
 }
 
-// --- Media Library & Playlist Manager ---
-function switchLibraryScreen(screen) {
-    activeLibraryScreen = screen;
-    document.getElementById('btn-sub-s1').className = `btn btn-secondary ${screen === 1 ? 'active' : ''}`;
-    document.getElementById('btn-sub-s2').className = `btn btn-secondary ${screen === 2 ? 'active' : ''}`;
-    
-    // Refresh status to draw current screen's playlist
-    fetchActiveDeviceStatus();
-}
-
-function updateLibraryPlaylistUI(allFiles) {
-    const listEl = document.getElementById('playlist-list-items');
+// --- Media Library ---
+function updateMediaLibraryUI(allFiles, playlist1, playlist2) {
+    const listEl = document.getElementById('media-library-items');
+    if (!listEl) return;
     listEl.innerHTML = '';
 
     if (!allFiles || allFiles.length === 0) {
-        listEl.innerHTML = '<li class="playlist-item text-muted">Folder media kosong. Silakan unggah file video.</li>';
+        listEl.innerHTML = `<li class="playlist-item text-muted" data-i18n="empty_folder">${t('empty_folder', 'Folder media kosong. Silakan unggah file video.')}</li>`;
         return;
     }
 
-    const screenKey = `screen${activeLibraryScreen}`;
-    const clipSettings = (audioConfig[screenKey] && audioConfig[screenKey].clip_settings) || {};
-    
-    // Get the playlist arrays from our new multi-playlist system
-    const screenPlaylists = playlistsData[screenKey] || { "Default": [] };
-    const currentPlaylistFiles = screenPlaylists[currentSelectedPlaylist] || [];
+    // Helper map to find sizes of files that are in either screen1 or screen2's playlist info
+    const sizes = {};
+    if (playlist1) playlist1.forEach(f => { if(f.size_mb) sizes[f.name] = f.size_mb; });
+    if (playlist2) playlist2.forEach(f => { if(f.size_mb) sizes[f.name] = f.size_mb; });
 
-    // Combine current playlist items with unselected ones at the bottom
-    let orderedFiles = [];
-    currentPlaylistFiles.forEach(fname => {
-        const found = allFiles.find(f => f === fname || f.name === fname);
-        if (found) orderedFiles.push(found);
-    });
-    allFiles.forEach(f => {
-        const fname = typeof f === 'string' ? f : f.name;
-        if (!currentPlaylistFiles.includes(fname)) {
-            orderedFiles.push(f);
-        }
-    });
-
-    orderedFiles.forEach((item, index) => {
-        const fname = typeof item === 'string' ? item : item.name;
-        const sizeMb = typeof item === 'string' ? '' : item.size_mb;
-        const isSelected = currentPlaylistFiles.includes(fname);
+    allFiles.forEach((fname) => {
+        const sizeMb = sizes[fname] || '';
+        const s1Settings = (audioConfig.screen1 && audioConfig.screen1.clip_settings) || {};
+        const isClipMuted = s1Settings[fname] ? s1Settings[fname].mute : false;
         
+        const muteBadgeClass = isClipMuted ? 'badge badge-error' : 'badge badge-success';
+        const muteBadgeText = isClipMuted ? t('badge_muted', '🔇 Muted') : t('badge_sound', '🔊 Sound');
+
         const li = document.createElement('li');
         li.className = 'playlist-item';
         li.dataset.filename = fname;
         
-        const isClipMuted = clipSettings[fname] ? clipSettings[fname].mute : false;
-        const muteBadgeClass = isClipMuted ? 'badge badge-error' : 'badge badge-success';
-        const muteBadgeText = isClipMuted ? '🔇 Muted' : '🔊 Sound';
-
         li.innerHTML = `
-            <div style="display: flex; align-items: center; gap: 12px; max-width: 65%;">
-                <input type="checkbox" class="playlist-checkbox" ${isSelected ? 'checked' : ''} style="cursor:pointer;" title="Sertakan ke playlist ini">
+            <div style="display: flex; align-items: center; gap: 12px; max-width: 75%;">
                 <div class="item-info" style="max-width: 100%;">
                     <div class="item-header-row" style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
-                        <span class="item-name" style="max-width: 150px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600;">${fname}</span>
-                        <span class="${muteBadgeClass}" onclick="toggleClipMute('${fname}')" style="cursor: pointer; font-size: 10px; padding: 2px 6px;" title="Klik untuk ubah status suara">${muteBadgeText}</span>
+                        <span class="item-name" style="max-width: 300px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600;" title="${fname}">${fname}</span>
+                        <span class="${muteBadgeClass}" onclick="toggleClipMuteGlobal('${fname}')" style="cursor: pointer; font-size: 10px; padding: 2px 6px;" title="${t('opt_audio_on', 'Klik untuk ubah status suara')}">${muteBadgeText}</span>
                     </div>
                     <span class="item-size" style="font-size: 11px; color: var(--text-muted);">${sizeMb ? sizeMb + ' MB' : ''}</span>
                 </div>
             </div>
             <div class="item-actions">
-                <button class="btn btn-sm btn-secondary" onclick="movePlaylistItem(${index}, -1)" ${index === 0 ? 'disabled' : ''}>🔼</button>
-                <button class="btn btn-sm btn-secondary" onclick="movePlaylistItem(${index}, 1)" ${index === orderedFiles.length - 1 ? 'disabled' : ''}>🔽</button>
-                <button class="btn btn-sm btn-danger" onclick="deleteVideoFile('${fname}')">🗑️</button>
+                <button class="btn btn-sm btn-danger" onclick="deleteVideoFileGlobal('${fname}')" title="Hapus Permanen">🗑️</button>
             </div>
         `;
         listEl.appendChild(li);
     });
 }
 
-// Move item up/down in the UI list
-function movePlaylistItem(index, direction) {
-    const listEl = document.getElementById('playlist-list-items');
-    const items = Array.from(listEl.children);
-    
-    if (direction === -1 && index > 0) {
-        listEl.insertBefore(items[index], items[index - 1]);
-    } else if (direction === 1 && index < items.length - 1) {
-        listEl.insertBefore(items[index + 1], items[index]);
+// Delete media asset globally
+async function deleteVideoFileGlobal(filename) {
+    const msg = t('confirm_delete_video_global', 'Apakah Anda yakin ingin menghapus "{filename}"? Berkas ini akan dihapus permanen dari sistem dan dari semua playlist.')
+        .replace('{filename}', filename);
+    if (!confirm(msg)) {
+        return;
     }
-    
-    // Re-enable/disable buttons accordingly
-    setTimeout(refreshOrderButtons, 50);
-}
-
-function refreshOrderButtons() {
-    const listEl = document.getElementById('playlist-list-items');
-    const items = Array.from(listEl.children);
-    items.forEach((item, index) => {
-        const upBtn = item.querySelector('.item-actions button:nth-child(1)');
-        const downBtn = item.querySelector('.item-actions button:nth-child(2)');
-        if (upBtn) upBtn.disabled = (index === 0);
-        if (downBtn) downBtn.disabled = (index === items.length - 1);
-    });
-}
-
-// Post ordered list to server
-async function savePlaylistOrder() {
-    const listEl = document.getElementById('playlist-list-items');
-    const items = Array.from(listEl.children);
-    const filenames = items.map(li => li.dataset.filename).filter(Boolean);
-
-    if (filenames.length === 0) return;
 
     try {
-        const url = getApiUrl('/api/playlist/save');
+        const url = getApiUrl('/api/delete');
         const res = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                screen: activeLibraryScreen,
-                playlist: filenames
+                filename: filename
             })
         });
 
         const data = await res.json();
         if (data.success) {
-            showToast(t('toast_playlist_saved', 'Urutan playlist berhasil disimpan!'));
-            fetchActiveDeviceStatus();
+            showToast(t('toast_video_deleted', 'Video berhasil dihapus'));
+            fetchPlaylistsAndSchedules().then(() => {
+                fetchActiveDeviceStatus();
+            });
         } else {
-            showToast(t('toast_playlist_save_fail', 'Gagal menyimpan: {error}').replace('{error}', data.error), true);
+            showToast(t('toast_command_fail', 'Gagal: {error}').replace('{error}', data.error), true);
         }
     } catch (e) {
-        showToast(t('toast_playlist_error', 'Error menghubungi server untuk playlist'), true);
+        showToast(t('toast_command_error', 'Error saat menghapus video'), true);
+    }
+}
+
+// Toggle clip audio globally
+async function toggleClipMuteGlobal(filename) {
+    const s1Settings = (audioConfig.screen1 && audioConfig.screen1.clip_settings) || {};
+    const currentMute = s1Settings[filename] ? s1Settings[filename].mute : false;
+    const newMute = !currentMute;
+    
+    try {
+        const url = getApiUrl('/api/audio/clip');
+        await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                screen: 1,
+                filename: filename,
+                mute: newMute
+            })
+        });
+        
+        await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                screen: 2,
+                filename: filename,
+                mute: newMute
+            })
+        });
+        
+        const msg = newMute ?
+            t('toast_clip_muted', 'Audio klip "{filename}" Dimatikan').replace('{filename}', filename) :
+            t('toast_clip_unmuted', 'Audio klip "{filename}" Dihidupkan').replace('{filename}', filename);
+        showToast(msg);
+        fetchActiveDeviceStatus();
+    } catch (e) {
+        showToast(t('toast_command_error', 'Gagal mengubah status audio klip'), true);
     }
 }
 
@@ -975,11 +996,12 @@ async function savePlaylistOrder() {
 function setupUploadZone() {
     const dropZone = document.getElementById('drop-zone');
     const fileInput = document.getElementById('file-input');
-    const targetScreenSelect = document.getElementById('upload-target-screen');
     const progressWrapper = document.getElementById('upload-progress-wrapper');
     const progressBar = document.getElementById('upload-progress');
     const uploadFilename = document.getElementById('upload-filename');
     const uploadPercent = document.getElementById('upload-percent');
+
+    if (!dropZone) return;
 
     dropZone.addEventListener('click', () => fileInput.click());
     
@@ -1007,14 +1029,12 @@ function setupUploadZone() {
     });
 
     function handleFileUpload(file) {
-        const targetScreen = targetScreenSelect.value;
-        const url = getApiUrl(`/api/upload?screen=${targetScreen}`);
+        const url = getApiUrl(`/api/upload`);
         
         const xhr = new XMLHttpRequest();
         const formData = new FormData();
         formData.append('file', file);
 
-        // Progress Handler
         progressWrapper.classList.remove('hidden');
         uploadFilename.textContent = file.name;
         progressBar.style.width = '0%';
@@ -1032,7 +1052,9 @@ function setupUploadZone() {
             if (xhr.status === 200) {
                 showToast(t('toast_upload_success', 'File berhasil diunggah!'));
                 setTimeout(() => progressWrapper.classList.add('hidden'), 1000);
-                fetchActiveDeviceStatus();
+                fetchPlaylistsAndSchedules().then(() => {
+                    fetchActiveDeviceStatus();
+                });
             } else {
                 showToast(t('toast_upload_fail', 'Gagal mengunggah file!'), true);
                 setTimeout(() => progressWrapper.classList.add('hidden'), 2000);
@@ -1045,40 +1067,7 @@ function setupUploadZone() {
         });
 
         xhr.open('POST', url, true);
-        // Do not set Content-Type header; XMLHttpRequest does it automatically with boundary for FormData
         xhr.send(formData);
-    }
-}
-
-// Delete media asset
-async function deleteVideoFile(filename) {
-    const msg = t('confirm_delete_video', 'Apakah Anda yakin ingin menghapus "{filename}" dari Layar {screen}?')
-        .replace('{filename}', filename)
-        .replace('{screen}', activeLibraryScreen);
-    if (!confirm(msg)) {
-        return;
-    }
-
-    try {
-        const url = getApiUrl('/api/delete');
-        const res = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                screen: activeLibraryScreen,
-                filename: filename
-            })
-        });
-
-        const data = await res.json();
-        if (data.success) {
-            showToast(t('toast_video_deleted', 'Video berhasil dihapus'));
-            fetchActiveDeviceStatus();
-        } else {
-            showToast(t('toast_command_fail', 'Gagal: {error}').replace('{error}', data.error), true);
-        }
-    } catch (e) {
-        showToast(t('toast_command_error', 'Error saat menghapus video'), true);
     }
 }
 
@@ -1260,55 +1249,54 @@ async function changeAudioChannel(screen) {
     }
 }
 
-async function toggleClipMute(filename) {
-    const screenKey = `screen${activeLibraryScreen}`;
-    const clipSettings = (audioConfig[screenKey] && audioConfig[screenKey].clip_settings) || {};
-    const currentMute = clipSettings[filename] ? clipSettings[filename].mute : false;
-    
-    try {
-        const url = getApiUrl('/api/audio/clip');
-        const res = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                screen: activeLibraryScreen,
-                filename: filename,
-                mute: !currentMute
-            })
-        });
-        const data = await res.json();
-        if (data.success) {
-            const msg = !currentMute ?
-                t('toast_clip_muted', 'Audio klip "{filename}" Dimatikan').replace('{filename}', filename) :
-                t('toast_clip_unmuted', 'Audio klip "{filename}" Dihidupkan').replace('{filename}', filename);
-            showToast(msg);
-            fetchActiveDeviceStatus();
-        }
-    } catch (e) {
-        showToast(t('toast_command_error', 'Gagal mengubah status audio klip'), true);
-    }
-}
-
 // --- Scheduling & Multiple Playlists Logic ---
 let schedulesData = { timezone_offset: 7, events: [] };
-let playlistsData = { screen1: { "Default": [] }, screen2: { "Default": [] } };
+let playlistsData = { playlists: { "Default": [] }, assignments: { "screen1": "Default", "screen2": "Default" } };
 let currentSelectedPlaylist = "Default";
 
 async function fetchPlaylistsAndSchedules() {
     try {
         const pRes = await fetch(getApiUrl('/api/playlists/list'));
-        if(pRes.ok) playlistsData = await pRes.json();
-        
-        const sRes = await fetch(getApiUrl('/api/schedule/config'));
-        if(sRes.ok) {
-            schedulesData = await sRes.json();
-            document.getElementById('tz-select').value = schedulesData.timezone_offset || 7;
+        if (pRes.ok) {
+            playlistsData = await pRes.json();
+            if (!playlistsData.playlists) playlistsData.playlists = { "Default": [] };
+            if (!playlistsData.assignments) playlistsData.assignments = { "screen1": "Default", "screen2": "Default" };
+            updateControlScreenPlaylistDropdowns();
+            renderPlaylistsUI();
         }
         
-        updateScheduleUI();
-        updatePlaylistDropdowns();
+        const sRes = await fetch(getApiUrl('/api/schedule/config'));
+        if (sRes.ok) {
+            schedulesData = await sRes.json();
+            const tzSelect = document.getElementById('tz-select');
+            if (tzSelect && document.activeElement !== tzSelect) {
+                tzSelect.value = schedulesData.timezone_offset || 7;
+            }
+            updateScheduleUI();
+            updateSchedulePlaylistOptions();
+        }
     } catch(e) {
         console.error("Error fetching playlists/schedules", e);
+    }
+}
+
+// Quiet version to prevent visual spam
+async function fetchPlaylistsAndSchedulesQuietly() {
+    try {
+        const pRes = await fetch(getApiUrl('/api/playlists/list'));
+        if (pRes.ok) {
+            playlistsData = await pRes.json();
+            if (!playlistsData.playlists) playlistsData.playlists = { "Default": [] };
+            if (!playlistsData.assignments) playlistsData.assignments = { "screen1": "Default", "screen2": "Default" };
+            updateControlScreenPlaylistDropdowns();
+        }
+        
+        const sRes = await fetch(getApiUrl('/api/schedule/config'));
+        if (sRes.ok) {
+            schedulesData = await sRes.json();
+        }
+    } catch(e) {
+        // Quiet fail
     }
 }
 
@@ -1319,77 +1307,292 @@ loadDevices = async function() {
     fetchPlaylistsAndSchedules();
 }
 
-function updatePlaylistDropdowns() {
-    const selManager = document.getElementById('select-playlist');
+function updateSchedulePlaylistOptions() {
     const selModal = document.getElementById('sch-playlist-name');
-    if(!selManager || !selModal) return;
-    
-    selManager.innerHTML = '';
+    if (!selModal) return;
     selModal.innerHTML = '';
     
-    const screenKey = `screen${activeLibraryScreen}`;
-    const screenPlaylists = playlistsData[screenKey] || { "Default": [] };
-    
-    Object.keys(screenPlaylists).forEach(pName => {
-        selManager.innerHTML += `<option value="${pName}">${pName}</option>`;
-        selModal.innerHTML += `<option value="${pName}">${pName}</option>`;
+    const playlists = playlistsData.playlists || {};
+    Object.keys(playlists).forEach(pName => {
+        const opt = document.createElement('option');
+        opt.value = pName;
+        opt.textContent = pName;
+        selModal.appendChild(opt);
     });
-    
-    selManager.value = currentSelectedPlaylist;
 }
 
-window.changePlaylist = function() {
-    currentSelectedPlaylist = document.getElementById('select-playlist').value;
-    fetchActiveDeviceStatus();
-}
+function updateControlScreenPlaylistDropdowns() {
+    const s1Select = document.getElementById('s1-select-assigned-playlist');
+    const s2Select = document.getElementById('s2-select-assigned-playlist');
+    if (!s1Select || !s2Select) return;
 
-window.createNewPlaylist = function() {
-    const name = prompt("Masukkan nama playlist baru:");
-    if(!name) return;
-    
-    const screenKey = `screen${activeLibraryScreen}`;
-    if(!playlistsData[screenKey]) playlistsData[screenKey] = {};
-    if(playlistsData[screenKey][name]) {
-        alert("Playlist sudah ada!");
-        return;
-    }
-    
-    playlistsData[screenKey][name] = [];
-    currentSelectedPlaylist = name;
-    saveAllPlaylists();
+    const s1Active = (playlistsData.assignments && playlistsData.assignments.screen1) || 'Default';
+    const s2Active = (playlistsData.assignments && playlistsData.assignments.screen2) || 'Default';
+
+    [s1Select, s2Select].forEach((selectEl) => {
+        selectEl.innerHTML = '';
+        const playlists = playlistsData.playlists || {};
+        Object.keys(playlists).forEach(pName => {
+            const opt = document.createElement('option');
+            opt.value = pName;
+            opt.textContent = pName;
+            selectEl.appendChild(opt);
+        });
+    });
+
+    s1Select.value = s1Active;
+    s2Select.value = s2Active;
 }
 
 async function saveAllPlaylists() {
     try {
-        await fetch(getApiUrl('/api/playlists/save_all'), {
+        const url = getApiUrl('/api/playlists/save_all');
+        const res = await fetch(url, {
             method: 'POST',
-            headers: {'Content-Type':'application/json'},
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(playlistsData)
         });
-        updatePlaylistDropdowns();
-        fetchActiveDeviceStatus();
-    } catch(e) {
+        const data = await res.json();
+        if (data.success) {
+            renderPlaylistsUI();
+            updateSchedulePlaylistOptions();
+            updateControlScreenPlaylistDropdowns();
+        } else {
+            showToast("Gagal menyimpan playlist", true);
+        }
+    } catch (e) {
         showToast("Error saving playlists", true);
     }
 }
 
-window.savePlaylistOrder = function() {
-    const listEl = document.getElementById('playlist-list-items');
+// Playlist manager views rendering
+function renderPlaylistsUI() {
+    const listEl = document.getElementById('global-playlist-names-list');
+    if (!listEl) return;
+    listEl.innerHTML = '';
+
+    const playlists = playlistsData.playlists || {};
+    
+    // Ensure Default playlist always exists
+    if (!playlists["Default"]) {
+        playlists["Default"] = [];
+    }
+
+    Object.keys(playlists).forEach(pName => {
+        const li = document.createElement('li');
+        li.className = `playlist-item ${currentSelectedPlaylist === pName ? 'active' : ''}`;
+        li.style.cursor = 'pointer';
+        li.style.display = 'flex';
+        li.style.justifyContent = 'space-between';
+        li.style.alignItems = 'center';
+        li.style.padding = '10px 14px';
+        li.style.borderRadius = '6px';
+        li.style.marginBottom = '6px';
+        li.style.backgroundColor = currentSelectedPlaylist === pName ? 'var(--primary-light)' : 'rgba(255,255,255,0.05)';
+        li.style.border = currentSelectedPlaylist === pName ? '1px solid var(--primary)' : '1px solid transparent';
+
+        li.addEventListener('click', (e) => {
+            if (e.target.tagName !== 'BUTTON') {
+                selectPlaylist(pName);
+            }
+        });
+
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = pName;
+        nameSpan.style.fontWeight = '500';
+        li.appendChild(nameSpan);
+
+        if (pName !== 'Default') {
+            const delBtn = document.createElement('button');
+            delBtn.className = 'btn btn-sm btn-danger';
+            delBtn.style.padding = '4px 8px';
+            delBtn.textContent = '🗑️';
+            delBtn.title = t('confirm_delete_playlist', 'Hapus playlist ini').replace('{playlistName}', pName);
+            delBtn.addEventListener('click', () => {
+                deletePlaylist(pName);
+            });
+            li.appendChild(delBtn);
+        }
+
+        listEl.appendChild(li);
+    });
+
+    const headerTitle = document.getElementById('selected-playlist-title-header');
+    if (headerTitle) {
+        headerTitle.textContent = `Playlist: ${currentSelectedPlaylist}`;
+    }
+
+    const allFiles = (window.lastFetchedStatus && window.lastFetchedStatus.screen1 && window.lastFetchedStatus.screen1.all_files) || [];
+    syncPlaylistCompositionUI(allFiles);
+}
+
+function selectPlaylist(pName) {
+    currentSelectedPlaylist = pName;
+    renderPlaylistsUI();
+}
+
+function deletePlaylist(pName) {
+    const msg = t('confirm_delete_playlist', 'Apakah Anda yakin ingin menghapus playlist "{playlistName}"?')
+        .replace('{playlistName}', pName);
+    if (!confirm(msg)) return;
+
+    if (playlistsData.playlists && playlistsData.playlists[pName]) {
+        delete playlistsData.playlists[pName];
+        
+        if (playlistsData.assignments) {
+            if (playlistsData.assignments.screen1 === pName) playlistsData.assignments.screen1 = 'Default';
+            if (playlistsData.assignments.screen2 === pName) playlistsData.assignments.screen2 = 'Default';
+        }
+
+        if (currentSelectedPlaylist === pName) {
+            currentSelectedPlaylist = 'Default';
+        }
+
+        saveAllPlaylists();
+    }
+}
+
+function createNewPlaylistFromInput() {
+    const inputEl = document.getElementById('new-playlist-name-input');
+    if (!inputEl) return;
+    const name = inputEl.value.trim();
+    if (!name) {
+        alert("Nama playlist tidak boleh kosong!");
+        return;
+    }
+
+    if (!playlistsData.playlists) playlistsData.playlists = {};
+    if (playlistsData.playlists[name]) {
+        alert("Playlist dengan nama tersebut sudah ada!");
+        return;
+    }
+
+    playlistsData.playlists[name] = [];
+    currentSelectedPlaylist = name;
+    inputEl.value = '';
+    
+    saveAllPlaylists();
+}
+
+function syncPlaylistCompositionUI(allFiles) {
+    const listEl = document.getElementById('playlist-composition-items');
+    if (!listEl) return;
+    listEl.innerHTML = '';
+
+    if (!allFiles || allFiles.length === 0) {
+        listEl.innerHTML = `<li class="playlist-item text-muted">${t('empty_folder', 'Folder media kosong. Silakan unggah file video.')}</li>`;
+        return;
+    }
+
+    const playlists = playlistsData.playlists || {};
+    const currentPlaylistFiles = playlists[currentSelectedPlaylist] || [];
+
+    let orderedFiles = [];
+    currentPlaylistFiles.forEach(fname => {
+        const found = allFiles.find(f => f === fname);
+        if (found) orderedFiles.push(found);
+    });
+    allFiles.forEach(f => {
+        if (!currentPlaylistFiles.includes(f)) {
+            orderedFiles.push(f);
+        }
+    });
+
+    orderedFiles.forEach((fname, index) => {
+        const isSelected = currentPlaylistFiles.includes(fname);
+        
+        const li = document.createElement('li');
+        li.className = 'playlist-item';
+        li.dataset.filename = fname;
+        
+        li.innerHTML = `
+            <div style="display: flex; align-items: center; gap: 12px; max-width: 65%;">
+                <input type="checkbox" class="playlist-checkbox" ${isSelected ? 'checked' : ''} style="cursor:pointer;" title="Sertakan ke playlist ini">
+                <div class="item-info" style="max-width: 100%;">
+                    <span class="item-name" style="font-weight: 500; font-size: 14px;" title="${fname}">${fname}</span>
+                </div>
+            </div>
+            <div class="item-actions">
+                <button class="btn btn-sm btn-secondary" onclick="movePlaylistCompItem(${index}, -1)" ${index === 0 ? 'disabled' : ''}>🔼</button>
+                <button class="btn btn-sm btn-secondary" onclick="movePlaylistCompItem(${index}, 1)" ${index === orderedFiles.length - 1 ? 'disabled' : ''}>🔽</button>
+            </div>
+        `;
+        listEl.appendChild(li);
+    });
+}
+
+function movePlaylistCompItem(index, direction) {
+    const listEl = document.getElementById('playlist-composition-items');
+    if (!listEl) return;
+    const items = Array.from(listEl.children);
+    
+    if (direction === -1 && index > 0) {
+        listEl.insertBefore(items[index], items[index - 1]);
+    } else if (direction === 1 && index < items.length - 1) {
+        listEl.insertBefore(items[index + 1], items[index]);
+    }
+    
+    setTimeout(refreshPlaylistCompOrderButtons, 50);
+}
+
+function refreshPlaylistCompOrderButtons() {
+    const listEl = document.getElementById('playlist-composition-items');
+    if (!listEl) return;
+    const items = Array.from(listEl.children);
+    items.forEach((item, index) => {
+        const upBtn = item.querySelector('.item-actions button:nth-child(1)');
+        const downBtn = item.querySelector('.item-actions button:nth-child(2)');
+        if (upBtn) upBtn.disabled = (index === 0);
+        if (downBtn) downBtn.disabled = (index === items.length - 1);
+    });
+}
+
+function savePlaylistComposition() {
+    const listEl = document.getElementById('playlist-composition-items');
+    if (!listEl) return;
     const items = Array.from(listEl.children);
     
     const filenames = items
         .filter(li => {
             const cb = li.querySelector('.playlist-checkbox');
-            return cb ? cb.checked : true;
+            return cb ? cb.checked : false;
         })
         .map(li => li.dataset.filename).filter(Boolean);
 
-    const screenKey = `screen${activeLibraryScreen}`;
-    if(!playlistsData[screenKey]) playlistsData[screenKey] = {};
-    playlistsData[screenKey][currentSelectedPlaylist] = filenames;
+    if (!playlistsData.playlists) playlistsData.playlists = {};
+    playlistsData.playlists[currentSelectedPlaylist] = filenames;
     
     saveAllPlaylists();
-    showToast(t('toast_playlist_saved', 'Playlist disimpan!'));
+    showToast(t('toast_playlist_saved', 'Playlist berhasil disimpan!'));
+}
+
+async function assignPlaylistToScreen(screen, playlistName) {
+    try {
+        const url = getApiUrl('/api/playlists/assign');
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                screen: screen,
+                playlist_name: playlistName
+            })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast(t('toast_playlist_assigned', 'Playlist {playlist} berhasil dipasang ke Layar {screen}!')
+                .replace('{playlist}', playlistName)
+                .replace('{screen}', screen));
+            
+            if (!playlistsData.assignments) playlistsData.assignments = {};
+            playlistsData.assignments[`screen${screen}`] = playlistName;
+            
+            fetchActiveDeviceStatus();
+        } else {
+            showToast("Gagal memasang playlist", true);
+        }
+    } catch (e) {
+        showToast("Error saat menghubungi server", true);
+    }
 }
 
 // Scheduling UI
@@ -1599,15 +1802,24 @@ window.saveNetworkConfig = async function() {
 };
 
 // Bind remaining inline onclick functions to window for global availability
-window.deleteVideoFile = deleteVideoFile;
-window.movePlaylistItem = movePlaylistItem;
-window.switchLibraryScreen = switchLibraryScreen;
-window.toggleClipMute = toggleClipMute;
+window.deleteVideoFile = deleteVideoFileGlobal;
+window.movePlaylistItem = movePlaylistCompItem;
+window.toggleClipMute = toggleClipMuteGlobal;
 window.changeAudioChannel = changeAudioChannel;
 window.changeAudioRoute = changeAudioRoute;
 window.toggleGlobalMute = toggleGlobalMute;
 window.togglePlay = togglePlay;
 window.controlDevice = controlDevice;
 window.refreshSingleScreenshot = refreshSingleScreenshot;
+
+window.deleteRegisteredDevice = deleteRegisteredDevice;
+window.createNewPlaylistFromInput = createNewPlaylistFromInput;
+window.savePlaylistComposition = savePlaylistComposition;
+window.deletePlaylist = deletePlaylist;
+window.selectPlaylist = selectPlaylist;
+window.movePlaylistCompItem = movePlaylistCompItem;
+window.toggleClipMuteGlobal = toggleClipMuteGlobal;
+window.deleteVideoFileGlobal = deleteVideoFileGlobal;
+window.assignPlaylistToScreen = assignPlaylistToScreen;
 
 

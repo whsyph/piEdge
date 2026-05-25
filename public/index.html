@@ -34,7 +34,10 @@
                     <span class="icon">📺</span> Layar Kontrol
                 </button>
                 <button class="nav-btn" data-tab="library" data-i18n="nav_library">
-                    <span class="icon">📁</span> Pustaka Media
+                    <span class="icon">📁</span> Media Library
+                </button>
+                <button class="nav-btn" data-tab="playlists" data-i18n="nav_playlists">
+                    <span class="icon">📋</span> Pengelola Playlist
                 </button>
                 <button class="nav-btn" data-tab="settings" data-i18n="nav_settings">
                     <span class="icon">⚙️</span> Pengaturan Pi
@@ -189,6 +192,13 @@
                                             onclick="controlDevice(1, 'stop_service')" data-i18n="btn_stop">Stop</button>
                                     </div>
                                 </div>
+
+                                <div class="playlist-assignment" style="border-top: 1px solid var(--border-color); padding-top: 18px;">
+                                     <h4 data-i18n="assigned_playlist_header" style="font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px;">Playlist Aktif</h4>
+                                     <select id="s1-select-assigned-playlist" class="form-select select-sm" style="width: 100%;" onchange="assignPlaylistToScreen(1, this.value)">
+                                         <!-- Dynamically populated -->
+                                     </select>
+                                </div>
                             </div>
                         </div>
 
@@ -266,6 +276,13 @@
                                             onclick="controlDevice(2, 'stop_service')" data-i18n="btn_stop">Stop</button>
                                     </div>
                                 </div>
+
+                                <div class="playlist-assignment" style="border-top: 1px solid var(--border-color); padding-top: 18px;">
+                                     <h4 data-i18n="assigned_playlist_header" style="font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px;">Playlist Aktif</h4>
+                                     <select id="s2-select-assigned-playlist" class="form-select select-sm" style="width: 100%;" onchange="assignPlaylistToScreen(2, this.value)">
+                                         <!-- Dynamically populated -->
+                                     </select>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -274,8 +291,8 @@
                 <!-- TAB 3: MEDIA LIBRARY -->
                 <div id="tab-library" class="tab-panel">
                     <div class="section-header">
-                        <h2 data-i18n="library_header">Pustaka Media & Pengelola Playlist</h2>
-                        <p data-i18n="library_sub_desc">Upload video baru dan tentukan urutan daftar putar pada tiap layar</p>
+                        <h2 data-i18n="library_header">Pustaka Media (Video Assets)</h2>
+                        <p data-i18n="library_sub_desc">Upload video baru dan kelola berkas aset media pada Raspberry Pi</p>
                     </div>
 
                     <div class="library-container">
@@ -287,14 +304,6 @@
                                 <p data-i18n="drop_zone">Tarik & lepas file video di sini, atau klik untuk memilih</p>
                                 <span class="upload-hint" data-i18n="supported_formats">Format yang didukung: MP4, MKV, AVI, MOV</span>
                                 <input type="file" id="file-input" accept="video/*" style="display: none;">
-                            </div>
-
-                            <div class="form-group margin-top-md">
-                                <label for="upload-target-screen" data-i18n="target_screen_label">Tujuan Layar:</label>
-                                <select id="upload-target-screen" class="form-select">
-                                    <option value="1" data-i18n="target_screen_1">Layar 1 (HDMI-1)</option>
-                                    <option value="2" data-i18n="target_screen_2">Layar 2 (HDMI-2)</option>
-                                </select>
                             </div>
 
                             <!-- Upload Progress -->
@@ -309,32 +318,47 @@
                             </div>
                         </div>
 
-                        <!-- Right Panel: Playlists -->
+                        <!-- Right Panel: Global Media Files List -->
                         <div class="library-right-card">
-                            <div class="tabs-sub">
-                                <button class="btn btn-secondary active" id="btn-sub-s1"
-                                    onclick="switchLibraryScreen(1)" data-i18n="playlist_tab_1">Layar 1</button>
-                                <button class="btn btn-secondary" id="btn-sub-s2" onclick="switchLibraryScreen(2)"
-                                    data-i18n="playlist_tab_2">Layar 2</button>
-                            </div>
+                            <h3 data-i18n="media_files_list_title">Daftar Berkas Aset Video</h3>
+                            <p class="help-text" data-i18n="media_files_list_sub">Semua video yang tersimpan di Raspberry Pi. Video-video ini dapat dimasukkan ke playlist mana saja.</p>
+                            <ul class="playlist-list" id="media-library-items">
+                                <!-- Dynamically populated media assets list -->
+                            </ul>
+                        </div>
+                    </div>
+                </div>
 
+                <!-- TAB 3.5: PENGELOLA PLAYLIST -->
+                <div id="tab-playlists" class="tab-panel">
+                    <div class="section-header">
+                        <h2 data-i18n="playlists_header">Pengelola Playlist Video</h2>
+                        <p data-i18n="playlists_sub_desc">Buat susunan playlist video dan urutan putarnya</p>
+                    </div>
+                    
+                    <div class="library-container">
+                        <!-- Left Column: Playlist List -->
+                        <div class="library-left-card">
+                            <h3 data-i18n="playlist_list_title">Daftar Playlist</h3>
+                            <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+                                <input type="text" id="new-playlist-name-input" class="form-input" style="flex:1; background-color: rgba(0,0,0,0.2); border: 1px solid var(--border-color); padding: 8px 12px; border-radius: 6px; color: var(--text-main);" placeholder="Nama Playlist Baru...">
+                                <button class="btn btn-secondary" onclick="createNewPlaylistFromInput()" title="Buat Playlist Baru">➕</button>
+                            </div>
+                            <ul class="playlist-list" id="global-playlist-names-list" style="max-height: 400px; overflow-y: auto;">
+                                <!-- Dynamically populated list of playlists -->
+                            </ul>
+                        </div>
+                        
+                        <!-- Right Column: Playlist Composition -->
+                        <div class="library-right-card">
                             <div class="playlist-manager-box">
-                                <div class="playlist-header" style="flex-direction: column; align-items: stretch; gap: 10px;">
-                                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                                        <h4 data-i18n="playlist_title">Daftar Putar Video</h4>
-                                        <button class="btn btn-sm btn-primary" onclick="savePlaylistOrder()" data-i18n="btn_save_order">💾 Simpan</button>
-                                    </div>
-                                    <div style="display: flex; gap: 10px; align-items: center;">
-                                        <label for="select-playlist" data-i18n="select_playlist_label">Pilih Playlist:</label>
-                                        <select id="select-playlist" class="form-select" onchange="changePlaylist()" style="flex: 1;">
-                                            <option value="Default">Default</option>
-                                        </select>
-                                        <button class="btn btn-sm btn-secondary" onclick="createNewPlaylist()" title="Buat Playlist Baru">➕</button>
-                                    </div>
+                                <div class="playlist-header" style="justify-content: space-between; align-items: center; display: flex; margin-bottom: 12px;">
+                                    <h4 id="selected-playlist-title-header">Playlist: Default</h4>
+                                    <button class="btn btn-primary" onclick="savePlaylistComposition()" data-i18n="btn_save_order">💾 Simpan Playlist</button>
                                 </div>
-                                <p class="help-text" data-i18n="playlist_sub" style="margin-top: 10px;">Gunakan tombol 🔼 dan 🔽 untuk mengatur urutan putar video. Centang video untuk memasukkannya ke playlist ini.</p>
-                                <ul class="playlist-list" id="playlist-list-items">
-                                    <!-- Dynamic playlist list -->
+                                <p class="help-text" data-i18n="playlist_compose_sub">Pilih video di bawah untuk dimasukkan ke playlist, dan gunakan 🔼 / 🔽 untuk mengatur urutan putar.</p>
+                                <ul class="playlist-list" id="playlist-composition-items" style="max-height: 400px; overflow-y: auto;">
+                                    <!-- Dynamically populated list of video assets with checkboxes and reorder controls -->
                                 </ul>
                             </div>
                         </div>

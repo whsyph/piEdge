@@ -14,6 +14,7 @@ from datetime import datetime, timezone, timedelta
 if os.path.exists('/home/pi'):
     VIDEO_DIR_1 = '/home/pi/museum_video/layar1'
     VIDEO_DIR_2 = '/home/pi/museum_video/layar2'
+    MEDIA_DIR = '/home/pi/museum_video/media'
     SOCK_1 = '/tmp/mpv-layar1.sock'
     SOCK_2 = '/tmp/mpv-layar2.sock'
     IS_PI = True
@@ -21,6 +22,7 @@ else:
     # Local Windows fallback for testing
     VIDEO_DIR_1 = os.path.join(os.getcwd(), 'mock_museum_video', 'layar1')
     VIDEO_DIR_2 = os.path.join(os.getcwd(), 'mock_museum_video', 'layar2')
+    MEDIA_DIR = os.path.join(os.getcwd(), 'mock_museum_video', 'media')
     SOCK_1 = '\\\\.\\pipe\\mpv-layar1'  # Named pipe or mocked socket
     SOCK_2 = '\\\\.\\pipe\\mpv-layar2'
     IS_PI = False
@@ -32,6 +34,7 @@ NETWORK_CONFIG_FILE = os.path.join(os.path.dirname(__file__), 'public', 'network
 # Ensure video directories exist
 os.makedirs(VIDEO_DIR_1, exist_ok=True)
 os.makedirs(VIDEO_DIR_2, exist_ok=True)
+os.makedirs(MEDIA_DIR, exist_ok=True)
 
 def init_json_files():
     if not os.path.exists(SCHEDULES_FILE):
@@ -41,11 +44,44 @@ def init_json_files():
             
     if not os.path.exists(PLAYLISTS_FILE):
         default_playlists = {
-            "screen1": {"Default": []},
-            "screen2": {"Default": []}
+            "playlists": {
+                "Default": []
+            },
+            "assignments": {
+                "screen1": "Default",
+                "screen2": "Default"
+            }
         }
         with open(PLAYLISTS_FILE, 'w', encoding='utf-8') as f:
             json.dump(default_playlists, f, indent=2)
+    else:
+        try:
+            with open(PLAYLISTS_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if "playlists" not in data or "assignments" not in data:
+                migrated = {
+                    "playlists": {},
+                    "assignments": {
+                        "screen1": "Default",
+                        "screen2": "Default"
+                    }
+                }
+                if "screen1" in data:
+                    for k, v in data["screen1"].items():
+                        migrated["playlists"][f"{k}_Screen1" if k == "Default" else k] = v
+                        if k == "Default":
+                            migrated["assignments"]["screen1"] = "Default_Screen1"
+                if "screen2" in data:
+                    for k, v in data["screen2"].items():
+                        migrated["playlists"][f"{k}_Screen2" if k == "Default" else k] = v
+                        if k == "Default":
+                            migrated["assignments"]["screen2"] = "Default_Screen2"
+                if not migrated["playlists"]:
+                    migrated["playlists"]["Default"] = []
+                with open(PLAYLISTS_FILE, 'w', encoding='utf-8') as f:
+                    json.dump(migrated, f, indent=2)
+        except Exception as e:
+            print(f"[Playlist Migration] Error: {e}")
 
     if not os.path.exists(NETWORK_CONFIG_FILE):
         default_network = {"selected": "eth"}
@@ -122,8 +158,52 @@ def apply_network_config():
     except Exception as e:
         print(f"[Network] Error applying network config: {e}")
 
+def migrate_existing_files():
+    try:
+        for source_dir in [VIDEO_DIR_1, VIDEO_DIR_2]:
+            if os.path.exists(source_dir):
+                for f in os.listdir(source_dir):
+                    if f.lower().endswith(('.mp4', '.mkv', '.avi', '.mov', '.webm')) and f != 'playlist.txt':
+                        src_path = os.path.join(source_dir, f)
+                        dst_path = os.path.join(MEDIA_DIR, f)
+                        if not os.path.exists(dst_path):
+                            shutil.copy2(src_path, dst_path)
+    except Exception as e:
+        print(f"[Migration] Error migrating files: {e}")
+
+def apply_playlist_assignments():
+    try:
+        if not os.path.exists(PLAYLISTS_FILE):
+            return
+        with open(PLAYLISTS_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        playlists = data.get("playlists", {})
+        assignments = data.get("assignments", {})
+        
+        for screen_name, pl_name in assignments.items():
+            screen_num = 1 if screen_name == "screen1" else 2
+            files = playlists.get(pl_name, [])
+            
+            upload_dir = VIDEO_DIR_1 if screen_num == 1 else VIDEO_DIR_2
+            playlist_path = os.path.join(upload_dir, 'playlist.txt')
+            
+            with open(playlist_path, 'w', encoding='utf-8') as pt:
+                for fname in files:
+                    f_path = os.path.join(MEDIA_DIR, fname)
+                    if os.path.exists(f_path):
+                        pt.write(f_path + '\n')
+                        
+            # Apply to MPV if running
+            sock_path = SOCK_1 if screen_num == 1 else SOCK_2
+            if IS_PI and os.path.exists(sock_path):
+                send_mpv_command(sock_path, ["loadlist", playlist_path])
+    except Exception as e:
+        print(f"[Assignments] Error applying playlist assignments: {e}")
+
 init_json_files()
+migrate_existing_files()
 apply_network_config()
+apply_playlist_assignments()
 
 # Generate default playlist if it doesn't exist
 def init_playlist_file(video_dir):
@@ -235,20 +315,25 @@ def check_schedules():
                         playlist_name = event.get("playlist_name", "Default")
                         
                         try:
-                            with open(PLAYLISTS_FILE, 'r', encoding='utf-8') as pf:
+                            with open(PLAYLISTS_FILE, 'r+', encoding='utf-8') as pf:
                                 pl_data = json.load(pf)
-                            screen_key = f"screen{screen}"
-                            files = pl_data.get(screen_key, {}).get(playlist_name, [])
-                            
-                            upload_dir = VIDEO_DIR_1 if screen == 1 else VIDEO_DIR_2
-                            playlist_path = os.path.join(upload_dir, 'playlist.txt')
-                            
-                            with open(playlist_path, 'w', encoding='utf-8') as pt:
-                                for fname in files:
-                                    f_path = os.path.join(upload_dir, fname)
-                                    if os.path.exists(f_path):
-                                        pt.write(f_path + '\n')
-                                        
+                                playlists = pl_data.get("playlists", {})
+                                files = playlists.get(playlist_name, [])
+                                
+                                upload_dir = VIDEO_DIR_1 if screen == 1 else VIDEO_DIR_2
+                                playlist_path = os.path.join(upload_dir, 'playlist.txt')
+                                
+                                with open(playlist_path, 'w', encoding='utf-8') as pt:
+                                    for fname in files:
+                                        f_path = os.path.join(MEDIA_DIR, fname)
+                                        if os.path.exists(f_path):
+                                            pt.write(f_path + '\n')
+                                            
+                                pl_data.setdefault("assignments", {})[f"screen{screen}"] = playlist_name
+                                pf.seek(0)
+                                json.dump(pl_data, pf, indent=2)
+                                pf.truncate()
+                                
                             sock_path = SOCK_1 if screen == 1 else SOCK_2
                             if IS_PI and os.path.exists(sock_path):
                                 send_mpv_command(sock_path, ["loadlist", playlist_path])
@@ -539,6 +624,8 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
             self.handle_api_system_shutdown()
         elif path == '/api/network/save':
             self.handle_api_network_save()
+        elif path == '/api/playlists/assign':
+            self.handle_api_playlists_assign()
         else:
             self.send_error(404, "Endpoint Not Found")
 
@@ -605,9 +692,9 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
                 duration = 120.0
                 paused = False
                 
-            # Read files in directory
+            # Read files in directory (Media Library)
             valid_exts = ('.mp4', '.mkv', '.avi', '.mov', '.webm')
-            all_files = [f for f in os.listdir(video_dir) if f.lower().endswith(valid_exts)]
+            all_files = [f for f in os.listdir(MEDIA_DIR) if f.lower().endswith(valid_exts)] if os.path.exists(MEDIA_DIR) else []
             
             # Get actual playlist order from playlist.txt
             playlist_path = os.path.join(video_dir, 'playlist.txt')
@@ -621,15 +708,10 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
                             if fname in all_files:
                                 playlist_order.append(fname)
             
-            # Append any files that are on disk but not in playlist.txt
-            for f in all_files:
-                if f not in playlist_order:
-                    playlist_order.append(f)
-                    
             # Get file sizes
             files_data = []
             for f in playlist_order:
-                f_path = os.path.join(video_dir, f)
+                f_path = os.path.join(MEDIA_DIR, f)
                 size_mb = round(os.path.getsize(f_path) / (1024 * 1024), 1) if os.path.exists(f_path) else 0
                 files_data.append({"name": f, "size_mb": size_mb})
 
@@ -722,26 +804,9 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
         boundary = content_type.split('boundary=')[1].strip()
         content_length = int(self.headers.get('Content-Length', 0))
         
-        # Get query parameters to know which screen folder to upload to
-        parsed_url = urllib.parse.urlparse(self.path)
-        query = urllib.parse.parse_qs(parsed_url.query)
-        screen = int(query.get('screen', [1])[0])
-        
-        upload_dir = VIDEO_DIR_1 if screen == 1 else VIDEO_DIR_2
-        
-        success, info = parse_multipart_upload(self.rfile, content_length, boundary, upload_dir)
+        success, info = parse_multipart_upload(self.rfile, content_length, boundary, MEDIA_DIR)
         
         if success:
-            # Rebuild playlist.txt automatically to include the new file
-            update_playlist_file(upload_dir)
-            
-            # Reload playlist in mpv if active
-            sock_path = SOCK_1 if screen == 1 else SOCK_2
-            playlist_path = os.path.join(upload_dir, 'playlist.txt')
-            if IS_PI and os.path.exists(sock_path):
-                # mpv command to reload playlist
-                send_mpv_command(sock_path, ["loadlist", playlist_path])
-                
             res = {"success": True, "filename": info}
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
@@ -757,33 +822,43 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
         
         try:
             params = json.loads(post_data)
-            screen = int(params.get('screen', 1))
             filename = params.get('filename', '')
             
             if not filename:
                 self.send_error(400, "Filename parameter missing")
                 return
                 
-            upload_dir = VIDEO_DIR_1 if screen == 1 else VIDEO_DIR_2
-            target_path = os.path.abspath(os.path.join(upload_dir, filename))
+            target_path = os.path.abspath(os.path.join(MEDIA_DIR, filename))
             
             # Security check
-            if not target_path.startswith(upload_dir):
+            if not target_path.startswith(MEDIA_DIR):
                 self.send_error(403, "Access Forbidden")
                 return
                 
             res = {"success": False, "error": "File not found"}
             if os.path.exists(target_path):
                 os.remove(target_path)
-                # Re-sync playlist.txt file
-                update_playlist_file(upload_dir)
                 
-                # Force reload playlist in MPV if running
-                sock_path = SOCK_1 if screen == 1 else SOCK_2
-                playlist_path = os.path.join(upload_dir, 'playlist.txt')
-                if IS_PI and os.path.exists(sock_path):
-                    send_mpv_command(sock_path, ["loadlist", playlist_path])
-                    
+                # Cleanup from playlists
+                try:
+                    with open(PLAYLISTS_FILE, 'r+', encoding='utf-8') as f:
+                        pl_data = json.load(f)
+                        playlists = pl_data.get("playlists", {})
+                        changed = False
+                        for pl_name, files in playlists.items():
+                            if filename in files:
+                                playlists[pl_name] = [x for x in files if x != filename]
+                                changed = True
+                        if changed:
+                            f.seek(0)
+                            json.dump(pl_data, f, indent=2)
+                            f.truncate()
+                            
+                    # Re-apply assignments to keep screens in sync
+                    apply_playlist_assignments()
+                except Exception as e:
+                    print(f"[Delete cleanup] Error: {e}")
+                
                 res = {"success": True, "message": "File deleted"}
                 
             self.send_response(200)
@@ -1096,6 +1171,32 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
             threading.Thread(target=do_apply, daemon=True).start()
             
             res = {"success": True, "message": f"Network path saved. Applying {selected.upper()}..."}
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_cors_headers()
+            self.end_headers()
+            self.wfile.write(json.dumps(res).encode('utf-8'))
+        except Exception as e:
+            self.send_error(500, str(e))
+
+    def handle_api_playlists_assign(self):
+        content_length = int(self.headers.get('Content-Length', 0))
+        post_data = self.rfile.read(content_length).decode('utf-8')
+        try:
+            params = json.loads(post_data)
+            screen = int(params.get("screen", 1))
+            playlist_name = params.get("playlist_name", "Default")
+            
+            with open(PLAYLISTS_FILE, 'r+', encoding='utf-8') as f:
+                data = json.load(f)
+                data.setdefault("assignments", {})[f"screen{screen}"] = playlist_name
+                f.seek(0)
+                json.dump(data, f, indent=2)
+                f.truncate()
+                
+            apply_playlist_assignments()
+            
+            res = {"success": True, "message": f"Playlist {playlist_name} assigned to Screen {screen}"}
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.send_cors_headers()
