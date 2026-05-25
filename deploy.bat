@@ -4,7 +4,7 @@ echo Anda akan diminta memasukkan password 'pi' beberapa kali.
 echo.
 
 scp server.py pi@192.168.88.46:/home/pi/museum_signage/
-scp public/index.html public/app.js public/app.css public/playlists.json public/schedules.json pi@192.168.88.46:/home/pi/museum_signage/public/
+scp public/index.html public/app.js public/app.css public/playlists.json public/schedules.json public/network_config.json pi@192.168.88.46:/home/pi/museum_signage/public/
 
 echo.
 echo Pengiriman selesai!
