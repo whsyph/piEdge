@@ -1,0 +1,25 @@
+{
+  "playlists": {
+    "Default_Screen1": [
+      "video_A.mp4",
+      "video_B.mp4",
+      "video_C.mp4"
+    ],
+    "Default_Screen2": [
+      "video_A1.mp4",
+      "video_B1.mp4",
+      "video_C1.mp4"
+    ],
+    "Default": [],
+    "Tempe Warrior": [
+      "TW - Tuminah.mp4",
+      "TW - Karti.mp4",
+      "TW - Kami.mp4",
+      "TW - Painah.mp4"
+    ]
+  },
+  "assignments": {
+    "screen1": "Tempe Warrior",
+    "screen2": "Tempe Warrior"
+  }
+}

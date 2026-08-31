@@ -1,0 +1,8 @@
+[
+  { "id": "pi-1-local", "name": "Layar Museum 1 (Local IP)", "ip": "192.168.88.46", "port": 8080 },
+  { "id": "pi-1-ts", "name": "Layar Museum 1 (Tailscale)", "ip": "100.67.29.36", "port": 8080 },
+  { "id": "pi-2", "name": "Layar Museum 2 (Gallery A)", "ip": "192.168.88.47", "port": 8080 },
+  { "id": "pi-3", "name": "Layar Museum 3 (Gallery B)", "ip": "192.168.88.48", "port": 8080 },
+  { "id": "pi-4", "name": "Layar Museum 4 (Exhibition)", "ip": "192.168.88.49", "port": 8080 },
+  { "id": "pi-5", "name": "Layar Museum 5 (Entrance)", "ip": "192.168.88.50", "port": 8080 }
+]
