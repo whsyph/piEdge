@@ -108,6 +108,13 @@
                             <p data-i18n="active_control_sub">Kelola pemutaran video secara real-time pada monitor HDMI</p>
                         </div>
                         <div class="toggle-preview-wrapper" style="display: flex; gap: 15px; align-items: center;">
+                            <div class="output-mode-wrapper">
+                                <label data-i18n="output_mode">Output:</label>
+                                <select id="output-mode-select" class="dropdown" onchange="toggleOutputMode(this.value)">
+                                    <option value="dual">Dual Output</option>
+                                    <option value="single">Single Output</option>
+                                </select>
+                            </div>
                             <button class="btn btn-danger" onclick="shutdownSystem()" data-i18n="btn_shutdown" title="Matikan Pi sepenuhnya">🔌 Shutdown Pi</button>
                             <span class="switch-label" data-i18n="auto_preview">Preview Otomatis (5d)</span>
                             <label class="switch">
@@ -203,7 +210,7 @@
                         </div>
 
                         <!-- Screen 2 Card -->
-                        <div class="screen-card">
+                        <div class="screen-card" id="s2-card">
                             <div class="screen-header-bar">
                                 <h3 data-i18n="screen2_title">Layar 2 (HDMI-A-2)</h3>
                                 <span id="s2-status-badge" class="badge badge-error">Offline</span>

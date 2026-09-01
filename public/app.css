@@ -1239,6 +1239,28 @@ body.theme-modern ::-webkit-scrollbar-thumb:hover {
     color: var(--text-muted);
 }
 
+.output-mode-wrapper {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.output-mode-wrapper label {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-muted);
+}
+
+.output-mode-wrapper select {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 4px 8px;
+    font-size: 13px;
+    cursor: pointer;
+}
+
 .switch {
     position: relative;
     display: inline-block;

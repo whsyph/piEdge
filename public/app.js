@@ -107,6 +107,9 @@ const i18n = {
         toast_upload_error: "Koneksi gagal saat mengunggah file",
         toast_upload_too_large: "File terlalu besar (maks 500MB)!",
         toast_command_fail: "Gagal: {error}",
+        toast_single_output: "Single Output activated!",
+        toast_dual_output: "Dual Output activated!",
+        output_mode: "Output:",
         toast_command_error: "Error mengirim perintah kontrol",
         toast_playlist_saved: "Urutan playlist berhasil disimpan!",
         toast_playlist_save_fail: "Gagal menyimpan: {error}",
@@ -276,6 +279,9 @@ const i18n = {
         toast_upload_error: "Connection failed during file upload",
         toast_upload_too_large: "File too large (max 500MB)!",
         toast_command_fail: "Failed: {error}",
+        toast_single_output: "Single Output activated!",
+        toast_dual_output: "Dual Output activated!",
+        output_mode: "Output:",
         toast_command_error: "Error sending control command",
         toast_playlist_saved: "Playlist order saved successfully!",
         toast_playlist_save_fail: "Failed to save: {error}",
@@ -389,6 +395,7 @@ function t(key, defaultValue = "") {
 
 let devices = [];
 let activeDeviceId = '';
+let serverIps = [];
 let activeLibraryScreen = 1;
 let statusInterval = null;
 let screenshotInterval = null;
@@ -450,15 +457,17 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Initial load
-    loadDevices().then(() => {
+    // Initial load: fetch server IPs first, then load devices
+    (async () => {
+        await fetchServerInfo();
+        await loadDevices();
         if (devices.length > 0) {
             // Default to local IP if available, or first device
             const defaultDev = devices.find(d => d.id === 'pi-1-local') || devices[0];
             selectDevice(defaultDev.id);
         }
         startPollers();
-    });
+    })();
 });
 
 // Tab Switcher Logic
@@ -578,13 +587,25 @@ function getActiveDevice() {
 }
 
 // Resolve API URL based on active device
+async function fetchServerInfo() {
+    try {
+        const res = await fetch('/api/server-info');
+        if (res.ok) {
+            const data = await res.json();
+            serverIps = data.ips || [];
+        }
+    } catch (e) {
+        console.warn("Could not fetch server info");
+    }
+}
+
 function getApiUrl(endpoint) {
     const dev = getActiveDevice();
     if (!dev) return endpoint;
 
     const hostname = window.location.hostname;
-    // If we are controlling the current host locally, use relative path to prevent CORS issues
-    if (dev.ip === hostname || dev.ip === '127.0.0.1' || dev.ip === 'localhost') {
+    // If dev.ip is one of this server's IPs, use relative path to prevent CORS issues
+    if (dev.ip === hostname || dev.ip === '127.0.0.1' || dev.ip === 'localhost' || serverIps.includes(dev.ip)) {
         return endpoint;
     }
     return `http://${dev.ip}:${dev.port}${endpoint}`;
@@ -639,6 +660,14 @@ async function fetchActiveDeviceStatus() {
         
         // Update screen components
         audioConfig = data.audio || {};
+        
+        // Set output mode from server
+        const mode = data.mode || 'dual';
+        const modeSelect = document.getElementById('output-mode-select');
+        if (modeSelect) modeSelect.value = mode;
+        const s2Card = document.getElementById('s2-card');
+        if (s2Card) s2Card.style.display = mode === 'single' ? 'none' : '';
+        
         updateScreenControlUI(1, data.screen1, audioConfig.screen1);
         updateScreenControlUI(2, data.screen2, audioConfig.screen2);
         
@@ -821,6 +850,31 @@ function togglePlay(screen) {
     const playBtn = document.getElementById(`s${screen}-btn-play`);
     const isPaused = playBtn.dataset.paused === 'true';
     controlDevice(screen, isPaused ? 'play' : 'pause');
+}
+
+async function toggleOutputMode(mode) {
+    try {
+        const url = getApiUrl('/api/output_mode');
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode, single_screen: 1 })
+        });
+        const data = await res.json();
+        if (data.success) {
+            const s2Card = document.getElementById('s2-card');
+            if (mode === 'single') {
+                if (s2Card) s2Card.style.display = 'none';
+                showToast(t('toast_single_output', 'Single Output activated!'));
+            } else {
+                if (s2Card) s2Card.style.display = '';
+                showToast(t('toast_dual_output', 'Dual Output activated!'));
+            }
+            setTimeout(() => fetchActiveDeviceStatus(), 3000);
+        }
+    } catch (e) {
+        showToast(t('toast_command_error', 'Error sending control command'), true);
+    }
 }
 
 // --- Overview Grid Handler ---

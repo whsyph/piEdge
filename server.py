@@ -28,6 +28,7 @@ else:
     IS_PI = False
 
 SCHEDULES_FILE = os.path.join(os.path.dirname(__file__), 'public', 'schedules.json')
+OUTPUT_MODE_FILE = os.path.join(os.path.dirname(__file__), 'public', 'output_mode.json')
 PLAYLISTS_FILE = os.path.join(os.path.dirname(__file__), 'public', 'playlists.json')
 NETWORK_CONFIG_FILE = os.path.join(os.path.dirname(__file__), 'public', 'network_config.json')
 
@@ -262,6 +263,20 @@ def send_mpv_command(sock_path, command_args):
         return {"error": "No response"}
     except Exception as e:
         return {"error": str(e)}
+
+def load_output_mode():
+    if os.path.exists(OUTPUT_MODE_FILE):
+        try:
+            with open(OUTPUT_MODE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {"mode": "dual", "single_screen": 1}
+
+
+def save_output_mode(data):
+    with open(OUTPUT_MODE_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
 
 # --- Background Schedule Worker ---
 def check_schedules():
@@ -610,6 +625,9 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
         elif path == '/api/network/config':
             self.handle_api_network_config()
             return
+        elif path == '/api/server-info':
+            self.handle_api_server_info()
+            return
 
         # --- Static Files Router ---
         if path == '/':
@@ -644,6 +662,7 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
             else:
                 self.send_header('Content-Type', 'application/octet-stream')
                 
+            self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
             self.end_headers()
             with open(target_file, 'rb') as f:
                 self.wfile.write(f.read())
@@ -675,6 +694,9 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
         elif path == '/api/network/save':
             self.handle_api_network_save()
         elif path == '/api/playlists/assign':
+            self.handle_api_playlists_assign()
+        elif path == '/api/output_mode':
+            self.handle_api_output_mode()
             self.handle_api_playlists_assign()
         else:
             self.send_error(404, "Endpoint Not Found")
@@ -789,11 +811,14 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
                 
+        mode_data = load_output_mode()
+        
         response_data = {
             "system": sys_stats,
             "screen1": screen1,
             "screen2": screen2,
-            "audio": audio_cfg
+            "audio": audio_cfg,
+            "mode": mode_data.get("mode", "dual")
         }
         
         self.send_response(200)
@@ -801,6 +826,34 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
         self.send_cors_headers()
         self.end_headers()
         self.wfile.write(json.dumps(response_data).encode('utf-8'))
+
+    def handle_api_output_mode(self):
+        content_length = int(self.headers.get('Content-Length', 0))
+        post_data = self.rfile.read(content_length).decode('utf-8')
+        try:
+            params = json.loads(post_data)
+            new_mode = params.get('mode', 'dual')
+            
+            save_output_mode({"mode": new_mode, "single_screen": 1})
+            
+            if new_mode == 'single' and IS_PI:
+                send_mpv_command(SOCK_2, ["quit"])
+                subprocess.run("pkill -f 'mpv.*layar2'", shell=True, capture_output=True)
+            
+            if IS_PI:
+                subprocess.run(
+                    "echo pi | sudo -S systemctl restart layar-gabungan.service",
+                    shell=True, capture_output=True
+                )
+            
+            res = {"success": True, "mode": new_mode}
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_cors_headers()
+            self.end_headers()
+            self.wfile.write(json.dumps(res).encode('utf-8'))
+        except Exception as e:
+            self.send_error(500, str(e))
 
     def handle_api_control(self):
         content_length = int(self.headers.get('Content-Length', 0))
@@ -1199,6 +1252,29 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
             if IS_PI:
                 subprocess.run("sudo shutdown -h now", shell=True)
         threading.Thread(target=run_shutdown, daemon=True).start()
+
+    def handle_api_server_info(self):
+        """Return server's own IP addresses for client-side detection."""
+        ips = ["127.0.0.1", "localhost"]
+        try:
+            result = subprocess.run(
+                ["ip", "-4", "-o", "addr", "show"],
+                capture_output=True, text=True, timeout=5
+            )
+            for line in result.stdout.strip().split("\n"):
+                parts = line.split()
+                if len(parts) >= 4:
+                    addr = parts[3].split("/")[0]
+                    if addr not in ips:
+                        ips.append(addr)
+        except Exception:
+            pass
+        res = {"success": True, "ips": ips}
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_cors_headers()
+        self.end_headers()
+        self.wfile.write(json.dumps(res).encode("utf-8"))
 
     def handle_api_network_config(self):
         try:
