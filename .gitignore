@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+*.pyo
+remote_work/
+mock_museum_video/
+public/output_mode.json
+.DS_Store
+Thumbs.db
+*.log

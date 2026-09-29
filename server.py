@@ -4,6 +4,7 @@ import json
 import socket
 import subprocess
 import shutil
+import tempfile
 import urllib.parse
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 import time
@@ -32,6 +33,10 @@ PLAYLISTS_FILE = os.path.join(os.path.dirname(__file__), "public", "playlists.js
 NETWORK_CONFIG_FILE = os.path.join(
     os.path.dirname(__file__), "public", "network_config.json"
 )
+OUTPUT_MODE_FILE = os.path.join(
+    os.path.dirname(__file__), "public", "output_mode.json"
+)
+PLAYER_SERVICE = "layar-gabungan.service"
 
 # Ensure video directories exist
 os.makedirs(VIDEO_DIR_1, exist_ok=True)
@@ -86,6 +91,10 @@ def init_json_files():
         default_network = {"selected": "eth"}
         with open(NETWORK_CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(default_network, f, indent=2)
+
+    if not os.path.exists(OUTPUT_MODE_FILE):
+        with open(OUTPUT_MODE_FILE, "w", encoding="utf-8") as f:
+            json.dump({"mode": "dual"}, f, indent=2)
 
 
 def get_network_interfaces():
@@ -498,19 +507,32 @@ def get_service_status(service_name):
 # --- Custom Multipart Parser for streaming upload ---
 def parse_multipart_upload(rfile, content_length, boundary, upload_dir):
     boundary_bytes = b"--" + boundary.encode("utf-8")
+    closing_boundary = b"\r\n" + boundary_bytes + b"--"
+    bytes_read = 0
+
+    if content_length <= 0:
+        return False, "Missing or invalid Content-Length"
+
+    def read_request_line():
+        nonlocal bytes_read
+        request_line = rfile.readline()
+        bytes_read += len(request_line)
+        return request_line
 
     # Read first line - should be boundary
-    line = rfile.readline()
-    if boundary_bytes not in line:
+    line = read_request_line()
+    if line.rstrip(b"\r\n") != boundary_bytes:
         return False, "Boundary mismatch"
 
     filename = None
     # Parse headers of the part
     while True:
-        line = rfile.readline().strip()
+        if bytes_read >= content_length or bytes_read > 65536:
+            return False, "Invalid multipart headers"
+        line = read_request_line().strip()
         if not line:
             break
-        if b"Content-Disposition:" in line:
+        if line.lower().startswith(b"content-disposition:"):
             parts = line.decode("utf-8", errors="ignore").split(";")
             for p in parts:
                 if "filename=" in p:
@@ -523,37 +545,62 @@ def parse_multipart_upload(rfile, content_length, boundary, upload_dir):
     filename = os.path.basename(filename)
     dest_path = os.path.join(upload_dir, filename)
 
-    # Read payload and stream to disk
+    # Stream into a temporary file. Only expose the final filename after the
+    # complete request and closing multipart boundary have arrived.
     buffer = b""
     chunk_size = 65536
-    remaining = content_length - len(line) - len(boundary_bytes)
+    remaining = content_length - bytes_read
+    boundary_found = False
+    temp_path = None
 
-    with open(dest_path, "wb") as f:
-        while True:
-            chunk = rfile.read(min(chunk_size, max(0, remaining)))
-            if not chunk:
-                break
-            remaining -= len(chunk)
-            buffer += chunk
+    try:
+        temp_fd, temp_path = tempfile.mkstemp(
+            prefix=f".{filename}.", suffix=".uploading", dir=upload_dir
+        )
+        with os.fdopen(temp_fd, "wb") as f:
+            while remaining > 0:
+                chunk = rfile.read(min(chunk_size, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
 
-            # Look for boundary
-            idx = buffer.find(boundary_bytes)
-            if idx != -1:
-                # Boundary found. Write data up to boundary (excluding trailing CRLF)
-                data_to_write = buffer[:idx]
-                if data_to_write.endswith(b"\r\n"):
-                    data_to_write = data_to_write[:-2]
-                f.write(data_to_write)
-                break
-            else:
-                # Keep buffer overlap padding
-                keep = len(boundary_bytes) + 8
-                if len(buffer) > keep:
-                    write_len = len(buffer) - keep
-                    f.write(buffer[:write_len])
-                    buffer = buffer[write_len:]
+                if boundary_found:
+                    continue
 
-    return True, filename
+                buffer += chunk
+                idx = buffer.find(closing_boundary)
+                if idx != -1:
+                    f.write(buffer[:idx])
+                    buffer = b""
+                    boundary_found = True
+                else:
+                    # Retain enough overlap to detect a boundary split across chunks.
+                    keep = len(closing_boundary) - 1
+                    if len(buffer) > keep:
+                        write_len = len(buffer) - keep
+                        f.write(buffer[:write_len])
+                        buffer = buffer[write_len:]
+
+            f.flush()
+            os.fsync(f.fileno())
+
+        if remaining != 0:
+            return False, "Upload interrupted before all bytes were received"
+        if not boundary_found:
+            return False, "Upload incomplete: closing multipart boundary not found"
+
+        os.chmod(temp_path, 0o644)
+        os.replace(temp_path, dest_path)
+        temp_path = None
+        return True, filename
+    except (OSError, ValueError) as exc:
+        return False, f"Could not save upload: {exc}"
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
 
 
 # --- HTTP Request Handler ---
@@ -597,6 +644,10 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
 
         elif path == "/api/network/config":
             self.handle_api_network_config()
+            return
+
+        elif path == "/api/output-mode":
+            self.handle_api_output_mode()
             return
 
         # --- Static Files Router ---
@@ -662,6 +713,8 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
             self.handle_api_system_shutdown()
         elif path == "/api/network/save":
             self.handle_api_network_save()
+        elif path == "/api/output-mode":
+            self.handle_api_output_mode()
         elif path == "/api/playlists/assign":
             self.handle_api_playlists_assign()
         else:
@@ -823,6 +876,66 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(json.dumps(response_data).encode("utf-8"))
 
+    def handle_api_output_mode(self):
+        """Read or update single/dual HDMI output mode."""
+        try:
+            if self.command == "GET":
+                mode = "dual"
+                if os.path.exists(OUTPUT_MODE_FILE):
+                    with open(OUTPUT_MODE_FILE, "r", encoding="utf-8") as f:
+                        mode = json.load(f).get("mode", "dual")
+                if mode not in ("single", "dual"):
+                    mode = "dual"
+                response = {"success": True, "mode": mode}
+            else:
+                content_length = int(self.headers.get("Content-Length", 0))
+                params = json.loads(self.rfile.read(content_length).decode("utf-8"))
+                mode = params.get("mode")
+                if mode not in ("single", "dual"):
+                    self.send_error(400, "mode must be single or dual")
+                    return
+
+                temp_file = OUTPUT_MODE_FILE + ".tmp"
+                with open(temp_file, "w", encoding="utf-8") as f:
+                    json.dump({"mode": mode}, f, indent=2)
+                    f.write("\n")
+                os.replace(temp_file, OUTPUT_MODE_FILE)
+
+                if IS_PI:
+                    result = subprocess.run(
+                        ["sudo", "-n", "systemctl", "restart", PLAYER_SERVICE],
+                        capture_output=True,
+                        text=True,
+                        timeout=20,
+                    )
+                    if result.returncode != 0:
+                        error = (result.stderr or result.stdout).strip()
+                        response = {
+                            "success": False,
+                            "mode": mode,
+                            "error": error or "Failed to restart player service",
+                        }
+                    else:
+                        response = {
+                            "success": True,
+                            "mode": mode,
+                            "message": f"Output mode changed to {mode}; player restarted",
+                        }
+                else:
+                    response = {
+                        "success": True,
+                        "mode": mode,
+                        "message": "Output mode saved in mock mode",
+                    }
+
+            self.send_response(200 if response.get("success", False) else 500)
+            self.send_header("Content-Type", "application/json")
+            self.send_cors_headers()
+            self.end_headers()
+            self.wfile.write(json.dumps(response).encode("utf-8"))
+        except Exception as e:
+            self.send_error(500, f"Error managing output mode: {e}")
+
     def handle_api_control(self):
         content_length = int(self.headers.get("Content-Length", 0))
         post_data = self.rfile.read(content_length).decode("utf-8")
@@ -874,8 +987,22 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
             self.send_error(400, "Content-Type must be multipart/form-data")
             return
 
-        boundary = content_type.split("boundary=")[1].strip()
-        content_length = int(self.headers.get("Content-Length", 0))
+        boundary = None
+        for parameter in content_type.split(";")[1:]:
+            key, separator, value = parameter.strip().partition("=")
+            if separator and key.lower() == "boundary":
+                boundary = value.strip().strip('"')
+                break
+
+        if not boundary:
+            self.send_error(400, "Multipart boundary is missing")
+            return
+
+        try:
+            content_length = int(self.headers.get("Content-Length", 0))
+        except (TypeError, ValueError):
+            self.send_error(400, "Invalid Content-Length")
+            return
 
         success, info = parse_multipart_upload(
             self.rfile, content_length, boundary, MEDIA_DIR
