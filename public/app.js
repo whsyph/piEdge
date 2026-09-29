@@ -19,6 +19,17 @@ const i18n = {
     active_control: "Kontrol Layar Aktif",
     active_control_sub:
       "Kelola pemutaran video secara real-time pada monitor HDMI",
+    output_mode_title: "Mode Output HDMI",
+    output_mode_sub:
+      "Gunakan Single untuk video 4K60 agar beban Raspberry Pi lebih ringan.",
+    output_mode_label: "Mode:",
+    output_mode_single: "Single Output (HDMI-A-1)",
+    output_mode_dual: "Dual Output (HDMI-A-1 + HDMI-A-2)",
+    output_mode_apply: "Terapkan & Restart Player",
+    output_mode_saved: "Mode output {mode} diterapkan",
+    output_mode_error: "Gagal mengubah mode output: {error}",
+    output_mode_confirm:
+      "Player akan direstart untuk mengubah mode output ke {mode}. Lanjutkan?",
     auto_preview: "Preview Otomatis (5d)",
     screen1_title: "Layar 1 (HDMI-A-1)",
     screen2_title: "Layar 2 (HDMI-A-2)",
@@ -204,6 +215,17 @@ const i18n = {
     all_screens_sub: "Real-time status of all Raspberry Pi units in the museum",
     active_control: "Active Screen Control",
     active_control_sub: "Manage real-time video playback on HDMI monitors",
+    output_mode_title: "HDMI Output Mode",
+    output_mode_sub:
+      "Use Single for 4K60 video to reduce Raspberry Pi workload.",
+    output_mode_label: "Mode:",
+    output_mode_single: "Single Output (HDMI-A-1)",
+    output_mode_dual: "Dual Output (HDMI-A-1 + HDMI-A-2)",
+    output_mode_apply: "Apply & Restart Player",
+    output_mode_saved: "Output mode {mode} applied",
+    output_mode_error: "Failed to change output mode: {error}",
+    output_mode_confirm:
+      "The player will restart to change output mode to {mode}. Continue?",
     auto_preview: "Auto Preview (5s)",
     screen1_title: "Screen 1 (HDMI-A-1)",
     screen2_title: "Screen 2 (HDMI-A-2)",
@@ -654,6 +676,84 @@ function refreshAllData() {
   refreshScreenshots(); // Fetch screenshots once on manual/device refresh
   updateOverviewGrid();
   fetchNetworkConfig();
+  fetchOutputMode();
+}
+
+async function fetchOutputMode() {
+  const select = document.getElementById("output-mode-select");
+  if (!select) return;
+  try {
+    const res = await fetch(getApiUrl("/api/output-mode"), {
+      signal: AbortSignal.timeout(2000),
+    });
+    if (!res.ok) throw new Error("Server error");
+    const data = await res.json();
+    if (data.mode === "single" || data.mode === "dual") {
+      select.value = data.mode;
+      const status = document.getElementById("output-mode-status");
+      if (status) {
+        status.textContent = data.mode === "single"
+          ? "Single output aktif"
+          : "Dual output aktif";
+      }
+    }
+  } catch (e) {
+    console.error("Gagal membaca mode output:", e);
+  }
+}
+
+async function applyOutputMode() {
+  const select = document.getElementById("output-mode-select");
+  const button = document.getElementById("output-mode-apply");
+  if (!select) return;
+  const mode = select.value;
+  const modeLabel = mode === "single" ? "Single" : "Dual";
+  const confirmText = t(
+    "output_mode_confirm",
+    "Player akan direstart untuk mengubah mode output ke {mode}. Lanjutkan?",
+  ).replace("{mode}", modeLabel);
+  if (!window.confirm(confirmText)) return;
+
+  const originalText = button ? button.textContent : "";
+  if (button) {
+    button.disabled = true;
+    button.textContent = "...";
+  }
+  try {
+    const res = await fetch(getApiUrl("/api/output-mode"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode }),
+      signal: AbortSignal.timeout(30000),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || "Server error");
+    }
+    showToast(
+      t("output_mode_saved", "Output mode {mode} applied").replace(
+        "{mode}",
+        modeLabel,
+      ),
+    );
+    const status = document.getElementById("output-mode-status");
+    if (status) status.textContent = `${modeLabel} output aktif`;
+    setTimeout(fetchActiveDeviceStatus, 1000);
+  } catch (e) {
+    showToast(
+      t("output_mode_error", "Failed to change output mode: {error}").replace(
+        "{error}",
+        e.message,
+      ),
+      true,
+    );
+    fetchOutputMode();
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
+  }
 }
 
 // Fetch active device details

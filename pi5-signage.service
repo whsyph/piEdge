@@ -1,0 +1,19 @@
+[Unit]
+Description=Raspberry Pi 5 4K signage players
+After=graphical-session.target labwc.service sound.target network-online.target
+Wants=network-online.target
+Requires=labwc.service
+
+[Service]
+User=pi
+Type=simple
+WorkingDirectory=/home/pi/museum_signage
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=WAYLAND_DISPLAY=wayland-0
+ExecStart=/bin/bash /home/pi/museum_signage/start_players_pi5.sh
+Restart=always
+RestartSec=5
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

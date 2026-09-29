@@ -328,6 +328,62 @@ body.theme-modern .top-header {
     font-size: 14px;
 }
 
+.output-mode-card {
+    display: grid;
+    grid-template-columns: minmax(220px, 1fr) auto;
+    gap: 16px 24px;
+    align-items: center;
+    margin: -12px 0 28px;
+    padding: 18px 20px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--card-shadow);
+}
+
+.output-mode-card h3 {
+    margin: 0 0 5px;
+    font-size: 15px;
+}
+
+.output-mode-card p {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 13px;
+}
+
+.output-mode-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.output-mode-actions label {
+    color: var(--text-muted);
+    font-size: 13px;
+}
+
+.output-mode-actions select {
+    min-width: 220px;
+}
+
+.output-mode-status {
+    grid-column: 1 / -1;
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+@media (max-width: 760px) {
+    .output-mode-card {
+        grid-template-columns: 1fr;
+    }
+
+    .output-mode-status {
+        grid-column: auto;
+    }
+}
+
 /* Grid System for Overview */
 .devices-grid {
     display: grid;

@@ -117,6 +117,22 @@
                         </div>
                     </div>
 
+                    <div class="output-mode-card">
+                        <div>
+                            <h3 data-i18n="output_mode_title">Mode Output HDMI</h3>
+                            <p data-i18n="output_mode_sub">Gunakan Single untuk video 4K60 agar beban Raspberry Pi lebih ringan.</p>
+                        </div>
+                        <div class="output-mode-actions">
+                            <label for="output-mode-select" data-i18n="output_mode_label">Mode:</label>
+                            <select id="output-mode-select" class="form-select select-sm">
+                                <option value="single" data-i18n="output_mode_single">Single Output (HDMI-A-1)</option>
+                                <option value="dual" data-i18n="output_mode_dual">Dual Output (HDMI-A-1 + HDMI-A-2)</option>
+                            </select>
+                            <button id="output-mode-apply" class="btn btn-primary btn-sm" onclick="applyOutputMode()" data-i18n="output_mode_apply">Terapkan & Restart Player</button>
+                        </div>
+                        <span id="output-mode-status" class="output-mode-status"></span>
+                    </div>
+
                     <div class="screens-row">
                         <!-- Screen 1 Card -->
                         <div class="screen-card">

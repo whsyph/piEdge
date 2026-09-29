@@ -139,6 +139,16 @@ For testing on Windows or macOS:
 
 ---
 
+## Raspberry Pi 5
+
+Untuk Raspberry Pi 5 1 GB dan pemutaran 4K60, gunakan profil baru `README_PI5.md`, `start_players_pi5.sh`, dan `pi5-signage.service`. Profil tersebut memakai `--hwdec=auto-safe` pada Wayland/dmabuf dan tidak mengubah deployment Raspberry Pi 4 yang sudah ada.
+
+```bash
+sudo bash install_pi5.sh
+```
+
+Sebelum produksi, validasi codec/resolusi/frame rate dengan `validate_media.sh` dan lakukan burn-in test minimal 12 jam.
+
 ## Credits
 - **Project Director**: Andri Risdianto
 - **Lead Designer**: Yoga Sadewo
