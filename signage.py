@@ -62,7 +62,7 @@ def playlist_files(config):
 
 def command_for(path, config):
     command = [
-        "mpv", "--vo=dmabuf-wayland", "--hwdec=auto-safe",
+        "mpv", "--vo=gpu", "--gpu-context=wayland", "--hwdec=auto-safe",
         "--hwdec-codecs=hevc,h264,vp9,av1", "--hwdec-extra-frames=16",
         "--msg-level=all=info",
         "--term-status-msg=",
