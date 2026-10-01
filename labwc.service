@@ -1,0 +1,19 @@
+[Unit]
+Description=Labwc Wayland kiosk for caPIbarra
+After=network.target sound.target systemd-user-sessions.service seatd.service
+Requires=seatd.service
+
+[Service]
+User=pi
+PAMName=login
+Type=simple
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=XDG_SESSION_TYPE=wayland
+ExecStartPre=/bin/sh -c 'until grep -qsx connected /sys/class/drm/card*-*/status; do sleep 2; done'
+ExecStart=/usr/bin/labwc
+Restart=always
+RestartSec=3
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

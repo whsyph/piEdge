@@ -1,0 +1,26 @@
+[Unit]
+Description=Pi 5 scheduled 4K signage
+After=systemd-user-sessions.service labwc.service
+Requires=labwc.service
+Conflicts=getty@tty1.service layar-gabungan.service layar1.service layar2.service
+
+[Service]
+Type=simple
+User=pi
+SupplementaryGroups=video render audio
+WorkingDirectory=/opt/pi5-signage
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=XDG_SESSION_TYPE=wayland
+Environment=WAYLAND_DISPLAY=wayland-0
+ExecStartPre=/opt/pi5-signage/splash.sh
+ExecStartPre=/bin/sleep 1
+ExecStart=/usr/bin/python3 /opt/pi5-signage/signage.py --config /etc/pi5-signage.json
+Restart=always
+RestartSec=5
+StandardInput=tty-force
+TTYPath=/dev/tty1
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

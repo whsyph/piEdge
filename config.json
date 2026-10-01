@@ -1,0 +1,12 @@
+{
+  "media_dir": "/home/pi/museum_video/media",
+  "playlist_file": "/home/pi/museum_signage/public/playlists.json",
+  "playlist_screen": "screen1",
+  "start": "00:00",
+  "end": "23:59",
+  "display": "HDMI-A-1",
+  "audio": false,
+  "audio_device": "sysdefault:CARD=vc4hdmi0",
+  "retry_seconds": 5,
+  "schedules_file": "/home/pi/museum_signage/public/schedules.json"
+}
