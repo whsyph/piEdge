@@ -384,6 +384,49 @@ body.theme-modern .top-header {
     }
 }
 
+.control-mode-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    margin: -12px 0 28px;
+    align-items: stretch;
+}
+
+.control-mode-grid > .output-mode-card {
+    min-width: 0;
+    margin: 0;
+    align-content: start;
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.control-mode-grid .output-mode-actions {
+    min-width: 0;
+}
+
+.control-mode-grid .output-mode-actions select {
+    min-width: 0;
+    max-width: 100%;
+}
+
+#tab-control > .output-mode-card {
+    display: grid;
+    grid-template-columns: minmax(220px, 1fr) auto;
+    gap: 16px 24px;
+    align-items: center;
+    margin: -12px 0 28px;
+    padding: 18px 20px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--card-shadow);
+}
+
+@media (max-width: 760px) {
+    .control-mode-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
 /* Grid System for Overview */
 .devices-grid {
     display: grid;

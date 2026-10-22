@@ -1417,6 +1417,7 @@ async function toggleGlobalMute(screen) {
       }),
     });
     const data = await res.json();
+    if (!res.ok || !data.success) throw new Error(data.error || "Audio request failed");
     if (data.success) {
       const msg = !currentMute
         ? t("toast_audio_muted", "Audio Layar {screen} Dimatikan").replace(
@@ -1460,6 +1461,7 @@ async function changeAudioRoute(screen) {
       }),
     });
     const data = await res.json();
+    if (!res.ok || !data.success) throw new Error(data.error || "Audio request failed");
     if (data.success) {
       showToast(
         t(
@@ -1501,6 +1503,7 @@ async function changeAudioChannel(screen) {
       }),
     });
     const data = await res.json();
+    if (!res.ok || !data.success) throw new Error(data.error || "Audio request failed");
     if (data.success) {
       showToast(
         t(

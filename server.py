@@ -16,7 +16,7 @@ if os.path.exists("/home/pi"):
     VIDEO_DIR_1 = "/home/pi/museum_video/layar1"
     VIDEO_DIR_2 = "/home/pi/museum_video/layar2"
     MEDIA_DIR = "/home/pi/museum_video/media"
-    SOCK_1 = "/tmp/mpv-layar1.sock"
+    SOCK_1 = "/run/user/1000/capibarra-mpv.sock"
     SOCK_2 = "/tmp/mpv-layar2.sock"
     IS_PI = True
 else:
@@ -36,7 +36,7 @@ NETWORK_CONFIG_FILE = os.path.join(
 OUTPUT_MODE_FILE = os.path.join(
     os.path.dirname(__file__), "public", "output_mode.json"
 )
-PLAYER_SERVICE = "layar-gabungan.service"
+PLAYER_SERVICE = "pi5-signage.service"
 
 # Ensure video directories exist
 os.makedirs(VIDEO_DIR_1, exist_ok=True)
@@ -247,38 +247,32 @@ init_playlist_file(VIDEO_DIR_2)
 
 # --- MPV IPC helpers ---
 def send_mpv_command(sock_path, command_args):
-    """Send JSON-IPC command to MPV Unix domain socket."""
+    """Read the matching IPC reply, ignoring asynchronous mpv events."""
     if not IS_PI:
-        # Mock responses on Windows
-        return {"data": f"Mock MPV command {command_args} received", "error": None}
-
-    if not os.path.exists(sock_path):
-        return {"error": "Socket not found"}
-
+        return {"error": "Player IPC unavailable on this platform"}
     try:
-        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        s.settimeout(0.5)
-        s.connect(sock_path)
-        payload = json.dumps({"command": command_args}) + "\n"
-        s.sendall(payload.encode("utf-8"))
-
-        # Read response line
-        response = b""
-        while True:
-            chunk = s.recv(4096)
-            if not chunk:
-                break
-            response += chunk
-            if b"\n" in chunk:
-                break
-        s.close()
-
-        lines = response.decode("utf-8").strip().split("\n")
-        if lines:
-            return json.loads(lines[0])
-        return {"error": "No response"}
-    except Exception as e:
-        return {"error": str(e)}
+        request_id = time.monotonic_ns()
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(1.0)
+            client.connect(sock_path)
+            client.sendall((json.dumps({"command": command_args, "request_id": request_id}) + "\n").encode())
+            pending = b""
+            deadline = time.monotonic() + 1.0
+            while time.monotonic() < deadline:
+                chunk = client.recv(4096)
+                if not chunk:
+                    break
+                pending += chunk
+                if len(pending) > 1048576:
+                    return {"error": "IPC response too large"}
+                while b"\n" in pending:
+                    line, pending = pending.split(b"\n", 1)
+                    message = json.loads(line)
+                    if message.get("request_id") == request_id:
+                        return message
+        return {"error": "No matching IPC response"}
+    except (OSError, ValueError, TypeError) as exc:
+        return {"error": str(exc)}
 
 
 # --- Background Schedule Worker ---
@@ -327,28 +321,17 @@ def check_schedules():
                         action = event.get("action")
                         if action == "sleep":
                             if IS_PI:
+                                # Legacy players only; pi5-signage now self-manages via schedules_file (schedules_allow)
                                 subprocess.run(
-                                    "sudo systemctl stop layar1.service layar2.service",
+                                    "sudo systemctl stop layar1.service layar2.service layar-gabungan.service",
                                     shell=True,
                                 )
-                                time.sleep(1)
-                                subprocess.run(
-                                    "sudo -u pi XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 wlr-randr --output HDMI-A-1 --off --output HDMI-A-2 --off",
-                                    shell=True,
-                                )
+                                # HDMI off optional: keep skipped if wlr-randr not installed
                         elif action == "wake":
                             if IS_PI:
+                                # Legacy players only; pi5-signage now self-manages via schedules_file (schedules_allow)
                                 subprocess.run(
-                                    "sudo -u pi XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 wlr-randr --output HDMI-A-1 --on --output HDMI-A-2 --on",
-                                    shell=True,
-                                )
-                                time.sleep(2)
-                                subprocess.run(
-                                    "sudo systemctl restart labwc.service", shell=True
-                                )
-                                time.sleep(3)
-                                subprocess.run(
-                                    "sudo systemctl restart layar1.service layar2.service",
+                                    "sudo systemctl stop layar1.service layar2.service layar-gabungan.service",
                                     shell=True,
                                 )
 
@@ -646,6 +629,9 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
             self.handle_api_network_config()
             return
 
+        elif path == "/api/operation-mode":
+            self.handle_api_operation_mode()
+            return
         elif path == "/api/output-mode":
             self.handle_api_output_mode()
             return
@@ -713,6 +699,9 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
             self.handle_api_system_shutdown()
         elif path == "/api/network/save":
             self.handle_api_network_save()
+        elif path == "/api/operation-mode":
+            self.handle_api_operation_mode()
+            return
         elif path == "/api/output-mode":
             self.handle_api_output_mode()
         elif path == "/api/playlists/assign":
@@ -765,39 +754,6 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
                         else False
                     )
 
-                    # Keep audio device output path and channel mode in sync
-                    config_path = os.path.join(
-                        os.path.dirname(__file__), "public", "audio_config.json"
-                    )
-                    if os.path.exists(config_path):
-                        try:
-                            with open(config_path, "r", encoding="utf-8") as f:
-                                cfg_data = json.load(f)
-                                scr_cfg = cfg_data.get(f"screen{screen_num}")
-                                if scr_cfg:
-                                    dev = scr_cfg.get("output_device", "hdmi")
-                                    dev_str = (
-                                        "alsa/plughw:CARD=Headphones,DEV=0"
-                                        if dev == "jack"
-                                        else f"alsa/plughw:CARD=vc4hdmi{screen_num-1},DEV=0"
-                                    )
-                                    send_mpv_command(
-                                        sock_path,
-                                        ["set_property", "audio-device", dev_str],
-                                    )
-
-                                    chan_mode = scr_cfg.get("channel_mode", "stereo")
-                                    if chan_mode == "left":
-                                        af_filter = "lavfi=[pan=stereo|c0=c0|c1=0*c1]"
-                                    elif chan_mode == "right":
-                                        af_filter = "lavfi=[pan=stereo|c0=0*c0|c1=c1]"
-                                    else:
-                                        af_filter = ""
-                                    send_mpv_command(
-                                        sock_path, ["set_property", "af", af_filter]
-                                    )
-                        except Exception:
-                            pass
             elif not IS_PI:
                 # Windows Mock
                 mpv_active = True
@@ -848,8 +804,41 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
                 "all_files": all_files,
             }
 
-        screen1 = get_screen_data(1, VIDEO_DIR_1, SOCK_1, "layar-gabungan.service")
-        screen2 = get_screen_data(2, VIDEO_DIR_2, SOCK_2, "layar-gabungan.service")
+        # Primary status from pi5-signage (single HDMI-A-1), fallback to legacy service for compatibility
+        pi5_active = get_service_status("pi5-signage.service") == "active"
+        # Try legacy sockets first, then fall back to pi5-signage process detection
+        def pi5_screen_fallback(screen_num):
+            # Detect pi5-signage mpv via pgrep when legacy IPC socket is absent
+            try:
+                import subprocess as _sp
+                res = _sp.run(["pgrep", "-a", "mpv"], capture_output=True, text=True, timeout=2)
+                for line in res.stdout.splitlines():
+                    if "capibarra" in line or "dmabuf-wayland" in line or "pi5-signage" in line:
+                        # parse -- /path/to/file.mp4 at end
+                        parts = line.strip().split(" -- ")[-1] if " -- " in line else line
+                        fname = parts.strip().split("/")[-1]
+                        if fname.lower().endswith((".mp4",".mkv",".mov",".avi",".webm")):
+                            # crude time_pos not available without IPC, keep 0
+                            return {"service_active": pi5_active, "mpv_connected": True, "playing_file": fname, "time_pos": 0, "duration": 0, "paused": False}
+                        return {"service_active": pi5_active, "mpv_connected": True, "playing_file": "Unknown", "time_pos": 0, "duration": 0, "paused": False}
+                return {"service_active": pi5_active, "mpv_connected": False, "playing_file": "None", "time_pos": 0, "duration": 0, "paused": False}
+            except Exception:
+                return {"service_active": pi5_active, "mpv_connected": False, "playing_file": "None", "time_pos": 0, "duration": 0, "paused": False}
+
+        # Use legacy get_screen_data but override service_active/mpv when pi5 is active and legacy shows inactive
+        legacy_s1 = get_screen_data(1, VIDEO_DIR_1, SOCK_1, "layar-gabungan.service")
+        legacy_s2 = get_screen_data(2, VIDEO_DIR_2, SOCK_2, "layar-gabungan.service")
+        if pi5_active and not legacy_s1.get("mpv_connected"):
+            fb = pi5_screen_fallback(1)
+            # keep playlist/all_files from legacy but override playback status
+            legacy_s1.update({k: fb[k] for k in ("service_active","mpv_connected","playing_file")})
+        elif pi5_active:
+            legacy_s1["service_active"] = True
+        if pi5_active:
+            # screen2 is not driven by pi5-signage (single HDMI-A-1) -> reflect real inactive
+            legacy_s2["service_active"] = False
+        screen1 = legacy_s1
+        screen2 = legacy_s2
 
         # Load audio configuration to merge into status payload
         audio_cfg = {}
@@ -876,110 +865,93 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(json.dumps(response_data).encode("utf-8"))
 
-    def handle_api_output_mode(self):
-        """Read or update single/dual HDMI output mode."""
+    def player_response(self, status, response):
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_cors_headers()
+        self.end_headers()
+        self.wfile.write(json.dumps(response).encode("utf-8"))
+
+    def player_params(self):
+        length = int(self.headers.get("Content-Length", 0))
+        if not 0 < length <= 4096:
+            raise ValueError("Invalid request length")
+        params = json.loads(self.rfile.read(length).decode("utf-8"))
+        if not isinstance(params, dict):
+            raise ValueError("Expected JSON object")
+        return params
+
+    def handle_api_operation_mode(self):
+        path = os.path.join(os.path.dirname(SCHEDULES_FILE), "operation_mode.json")
         try:
-            if self.command == "GET":
-                mode = "dual"
-                if os.path.exists(OUTPUT_MODE_FILE):
-                    with open(OUTPUT_MODE_FILE, "r", encoding="utf-8") as f:
-                        mode = json.load(f).get("mode", "dual")
-                if mode not in ("single", "dual"):
-                    mode = "dual"
-                response = {"success": True, "mode": mode}
-            else:
-                content_length = int(self.headers.get("Content-Length", 0))
-                params = json.loads(self.rfile.read(content_length).decode("utf-8"))
-                mode = params.get("mode")
-                if mode not in ("single", "dual"):
-                    self.send_error(400, "mode must be single or dual")
+            with open("/proc/sys/kernel/random/boot_id") as f:
+                boot = f.read().strip()
+            if self.command == "POST":
+                mode = self.player_params().get("mode")
+                if mode not in ("auto", "on", "off"):
+                    self.player_response(400, {"success": False, "error": "mode must be auto, on or off"})
                     return
+                fd, temporary = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".operation-")
+                try:
+                    with os.fdopen(fd, "w") as f:
+                        json.dump({"mode": mode, "boot_id": boot}, f)
+                        f.flush()
+                        os.fsync(f.fileno())
+                    os.replace(temporary, path)
+                finally:
+                    if os.path.exists(temporary):
+                        os.unlink(temporary)
+            else:
+                mode = "auto"
+                try:
+                    with open(path) as f:
+                        data = json.load(f)
+                    if isinstance(data, dict) and data.get("boot_id") == boot and data.get("mode") in ("auto", "on", "off"):
+                        mode = data["mode"]
+                except (OSError, ValueError):
+                    pass
+            self.player_response(200, {"success": True, "mode": mode, "manual": mode != "auto", "reset_on_reboot": True})
+        except (ValueError, TypeError, UnicodeError) as e:
+            self.player_response(400, {"success": False, "error": str(e)})
+        except OSError:
+            self.player_response(503, {"success": False, "error": "Operation mode storage unavailable"})
 
-                temp_file = OUTPUT_MODE_FILE + ".tmp"
-                with open(temp_file, "w", encoding="utf-8") as f:
-                    json.dump({"mode": mode}, f, indent=2)
-                    f.write("\n")
-                os.replace(temp_file, OUTPUT_MODE_FILE)
-
-                if IS_PI:
-                    result = subprocess.run(
-                        ["sudo", "-n", "systemctl", "restart", PLAYER_SERVICE],
-                        capture_output=True,
-                        text=True,
-                        timeout=20,
-                    )
-                    if result.returncode != 0:
-                        error = (result.stderr or result.stdout).strip()
-                        response = {
-                            "success": False,
-                            "mode": mode,
-                            "error": error or "Failed to restart player service",
-                        }
-                    else:
-                        response = {
-                            "success": True,
-                            "mode": mode,
-                            "message": f"Output mode changed to {mode}; player restarted",
-                        }
-                else:
-                    response = {
-                        "success": True,
-                        "mode": mode,
-                        "message": "Output mode saved in mock mode",
-                    }
-
-            self.send_response(200 if response.get("success", False) else 500)
-            self.send_header("Content-Type", "application/json")
-            self.send_cors_headers()
-            self.end_headers()
-            self.wfile.write(json.dumps(response).encode("utf-8"))
-        except Exception as e:
-            self.send_error(500, f"Error managing output mode: {e}")
+    def handle_api_output_mode(self):
+        try:
+            if self.command != "GET":
+                mode = self.player_params().get("mode")
+                if mode != "single":
+                    self.player_response(409, {"success": False, "error": "Pi 5 supports single HDMI-A-1 only"})
+                    return
+                # This player is fixed to single; no restart or config mutation needed.
+            self.player_response(200, {"success": True, "mode": "single", "supported_modes": ["single"]})
+        except (ValueError, UnicodeError) as e:
+            self.player_response(400, {"success": False, "error": str(e)})
 
     def handle_api_control(self):
-        content_length = int(self.headers.get("Content-Length", 0))
-        post_data = self.rfile.read(content_length).decode("utf-8")
-
         try:
-            params = json.loads(post_data)
+            params = self.player_params()
             screen = int(params.get("screen", 1))
-            action = params.get(
-                "action", ""
-            )  # play, pause, next, prev, restart_service, stop_service, start_service
-
-            sock_path = SOCK_1 if screen == 1 else SOCK_2
-            service_name = "layar-gabungan.service"
-
-            res = {"success": True, "message": "Command processed"}
-
-            if action == "play":
-                send_mpv_command(sock_path, ["set_property", "pause", False])
-            elif action == "pause":
-                send_mpv_command(sock_path, ["set_property", "pause", True])
-            elif action == "next":
-                send_mpv_command(sock_path, ["playlist-next"])
-            elif action == "prev":
-                send_mpv_command(sock_path, ["playlist-prev"])
-            elif action in ["restart_service", "stop_service", "start_service"]:
-                if IS_PI:
-                    cmd_type = action.split("_")[0]  # restart, stop, start
-                    # Executing service command via sudo
-                    # We pipe the password 'pi' to sudo
-                    cmd = f"echo pi | sudo -S systemctl {cmd_type} {service_name}"
-                    subprocess.run(cmd, shell=True, capture_output=True)
-                    res["message"] = f"Service {service_name} {cmd_type}ed"
-                else:
-                    res["message"] = f"Mocked {action} on Windows"
-            else:
-                res = {"success": False, "error": f"Unknown action: {action}"}
-
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_cors_headers()
-            self.end_headers()
-            self.wfile.write(json.dumps(res).encode("utf-8"))
-        except Exception as e:
-            self.send_error(500, f"Error processing control: {e}")
+            action = params.get("action", "")
+            if screen != 1:
+                self.player_response(409, {"success": False, "error": "Only screen 1 is supported"})
+                return
+            if action in ("play", "pause", "next", "prev"):
+                self.player_response(409, {"success": False, "error": "Pi 5 player IPC controls are not implemented; legacy control is disabled"})
+                return
+            if action not in ("restart_service", "start_service", "stop_service"):
+                self.player_response(400, {"success": False, "error": "Unknown action"})
+                return
+            operation = action.split("_")[0]
+            result = subprocess.run(["sudo", "-n", "systemctl", operation, PLAYER_SERVICE], capture_output=True, text=True, timeout=20)
+            if result.returncode:
+                self.player_response(503, {"success": False, "error": "Player service operation failed; check service permissions", "service": PLAYER_SERVICE})
+                return
+            self.player_response(200, {"success": True, "service": PLAYER_SERVICE, "message": operation + " succeeded"})
+        except (ValueError, TypeError, UnicodeError) as e:
+            self.player_response(400, {"success": False, "error": str(e)})
+        except (OSError, subprocess.TimeoutExpired):
+            self.player_response(503, {"success": False, "error": "Player service command unavailable or timed out"})
 
     def handle_api_upload(self):
         content_type = self.headers.get("Content-Type", "")
@@ -1183,57 +1155,63 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(json.dumps(data).encode("utf-8"))
 
     def handle_api_audio_global(self):
-        content_length = int(self.headers.get("Content-Length", 0))
-        post_data = self.rfile.read(content_length).decode("utf-8")
-
         try:
-            params = json.loads(post_data)
-            screen = int(params.get("screen", 1))
-            global_mute = params.get("global_mute", True)
-            output_device = params.get("output_device", "hdmi")
-            channel_mode = params.get("channel_mode", "stereo")
-
-            config_path = os.path.join(
-                os.path.dirname(__file__), "public", "audio_config.json"
-            )
-            with open(config_path, "r+", encoding="utf-8") as f:
+            params = self.player_params()
+            screen = params.get("screen", 1)
+            muted = params.get("global_mute")
+            output = params.get("output_device", "hdmi")
+            channel = params.get("channel_mode", "stereo")
+            if type(screen) is not int or screen != 1:
+                self.player_response(409, {"success": False, "error": "Only screen 1 is supported"})
+                return
+            if type(muted) is not bool or output not in ("hdmi", "jack") or channel not in ("stereo", "left", "right"):
+                raise ValueError("Invalid audio settings")
+            if output != "hdmi":
+                self.player_response(409, {"success": False, "error": "This Pi uses HDMI audio; jack is not supported"})
+                return
+            config_path = os.path.join(os.path.dirname(__file__), "public", "audio_config.json")
+            with open(config_path, encoding="utf-8") as f:
                 data = json.load(f)
-                screen_key = f"screen{screen}"
-                if screen_key in data:
-                    data[screen_key]["global_mute"] = global_mute
-                    data[screen_key]["output_device"] = output_device
-                    data[screen_key]["channel_mode"] = channel_mode
-                f.seek(0)
-                json.dump(data, f, indent=2)
-                f.truncate()
-
-            # Update MPV directly
-            sock_path = SOCK_1 if screen == 1 else SOCK_2
-            send_mpv_command(sock_path, ["set_property", "mute", global_mute])
-
-            if output_device == "jack":
-                device_str = "alsa/plughw:CARD=Headphones,DEV=0"
-            else:
-                device_str = f"alsa/plughw:CARD=vc4hdmi{screen-1},DEV=0"
-            send_mpv_command(sock_path, ["set_property", "audio-device", device_str])
-
-            # Sync channel mode (af filter)
-            if channel_mode == "left":
-                af_filter = "lavfi=[pan=stereo|c0=c0|c1=0*c1]"
-            elif channel_mode == "right":
-                af_filter = "lavfi=[pan=stereo|c0=0*c0|c1=c1]"
-            else:
-                af_filter = ""
-            send_mpv_command(sock_path, ["set_property", "af", af_filter])
-
-            res = {"success": True, "message": "Global audio settings updated"}
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_cors_headers()
-            self.end_headers()
-            self.wfile.write(json.dumps(res).encode("utf-8"))
-        except Exception as e:
-            self.send_error(500, f"Error processing global audio: {e}")
+            current = send_mpv_command(SOCK_1, ["get_property", "filename"])
+            applied = current.get("error") == "success"
+            if not applied and get_service_status(PLAYER_SERVICE) == "active" and os.path.exists(SOCK_1):
+                self.player_response(503, {"success": False, "error": "Player IPC unavailable; audio was not changed"})
+                return
+            cfg = data.setdefault("screen1", {})
+            clip_mute = cfg.get("clip_settings", {}).get(current.get("data", ""), {}).get("mute", False)
+            effective_mute = muted or clip_mute
+            if applied:
+                af = {"stereo": "", "left": "lavfi=[pan=stereo|c0=c0|c1=0*c1]", "right": "lavfi=[pan=stereo|c0=0*c0|c1=c1]"}[channel]
+                device = send_mpv_command(SOCK_1, ["get_property", "audio-device"])
+                commands = []
+                if device.get("data") != "alsa/sysdefault:CARD=vc4hdmi0":
+                    commands.append(["set_property", "audio-device", "alsa/sysdefault:CARD=vc4hdmi0"])
+                commands += [["set_property", "af", af], ["set_property", "mute", effective_mute]]
+                for command in commands:
+                    result = send_mpv_command(SOCK_1, command)
+                    if result.get("error") != "success":
+                        self.player_response(503, {"success": False, "error": "Player rejected audio setting", "detail": result.get("error")})
+                        return
+                actual = send_mpv_command(SOCK_1, ["get_property", "mute"])
+                if actual.get("error") != "success" or actual.get("data") != effective_mute:
+                    self.player_response(503, {"success": False, "error": "Mute verification failed"})
+                    return
+            cfg.update(global_mute=muted, output_device=output, channel_mode=channel)
+            fd, temporary = tempfile.mkstemp(dir=os.path.dirname(config_path), prefix=".audio-")
+            try:
+                with os.fdopen(fd, "w") as f:
+                    json.dump(data, f, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(temporary, config_path)
+            finally:
+                if os.path.exists(temporary):
+                    os.unlink(temporary)
+            self.player_response(200, {"success": True, "applied": applied, "global_mute": muted, "message": "Audio applied" if applied else "Saved for next playback"})
+        except (ValueError, TypeError, UnicodeError) as exc:
+            self.player_response(400, {"success": False, "error": str(exc)})
+        except OSError:
+            self.player_response(503, {"success": False, "error": "Audio settings could not be saved"})
 
     def handle_api_audio_clip(self):
         content_length = int(self.headers.get("Content-Length", 0))
