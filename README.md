@@ -90,6 +90,27 @@ Petunjuk operasional dan perintah rollback deployment saat ini:
 `docs/03-operations.md`. Jangan mengganti playlist, schedules, audio preferences,
 operation mode atau media saat deploy kode.
 
+## Mengambil source yang benar dari GitHub
+
+Untuk **Pi4**:
+
+```bash
+git clone --branch capibarra-lite-pi4 --single-branch https://github.com/whsyph/piEdge.git capibarra-lite-pi4
+```
+
+Untuk **Pi5**, gunakan folder dan branch berbeda:
+
+```bash
+git clone --branch capibarra-lite --single-branch https://github.com/whsyph/piEdge.git capibarra-lite-pi5
+```
+
+Perintah tersebut hanya mengambil source, **bukan melakukan instalasi**. Jangan
+clone branch default lalu menebak targetnya. Installer Pi4 pada snapshot ini
+menjaga model dan baseline source; ia bukan fresh-installer untuk Pi4 kosong.
+Installer/fresh-install Pi5 juga belum diuji ulang oleh publikasi Pi4 ini.
+Untuk perangkat baru, gunakan paket/installer khusus model yang telah diuji;
+jangan melewati guard atau memakai paket board lain agar instalasi terpaksa jalan.
+
 ## Pemisahan versi
 
 | Target | Branch | Runtime |

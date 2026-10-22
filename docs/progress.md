@@ -30,8 +30,9 @@ Mode ON dan audio unmute. Ini bukti sampel, bukan burn-in semalam.
   oleh tugas commit Pi4 ini.
 - Folder Pi5 yang memiliki perubahan packaging lokal tidak di-reset, di-checkout,
   di-stash atau ditimpa. Snapshot hash sumber dirty diperiksa sebelum/sesudah.
-- Commit checkpoint ini lokal saja, sesuai permintaan commit. Push GitHub dan
-  penggabungan branch merupakan langkah terpisah setelah diminta pengguna.
+- Checkpoint kode `cb9f2b5` sudah dipublikasikan atas permintaan pengguna ke
+  **`origin/capibarra-lite-pi4`**. Branch Pi5 `capibarra-lite` tidak diubah atau
+  di-merge. Push dilakukan sebagai langkah terpisah dari commit lokal awal.
 
 ## Operasional
 
