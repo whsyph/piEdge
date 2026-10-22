@@ -1,0 +1,29 @@
+[Unit]
+Description=caPIbarra Pi4 direct DRM hardware-plane signage
+After=systemd-user-sessions.service sound.target
+Conflicts=labwc.service layar-gabungan.service layar1.service layar2.service getty@tty8.service
+
+[Service]
+Type=simple
+User=pi
+PAMName=login
+SupplementaryGroups=video render audio
+WorkingDirectory=/opt/pi5-signage
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+StandardInput=tty-force
+TTYPath=/dev/tty8
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+ExecStartPre=+/usr/bin/chvt 8
+ExecStartPre=-/opt/pi5-signage/splash.sh
+ExecStart=/usr/bin/python3 /opt/pi5-signage/signage.py --config /etc/pi5-signage.json
+Restart=always
+RestartSec=5
+TimeoutStopSec=12
+KillMode=control-group
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

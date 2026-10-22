@@ -1,0 +1,16 @@
+{
+  "media_dir": "/home/pi/museum_video/media",
+  "playlist_file": "/home/pi/museum_signage/public/playlists.json",
+  "playlist_screen": "screen1",
+  "start": "00:00",
+  "end": "23:59",
+  "display": "HDMI-A-1",
+  "audio": true,
+  "audio_device": "alsa/sysdefault:CARD=vc4hdmi0",
+  "retry_seconds": 5,
+  "schedules_file": "/home/pi/museum_signage/public/schedules.json",
+  "renderer": "drm-overlay",
+  "drm_device": "/dev/dri/card1",
+  "drm_mode": "1920x1080@60",
+  "splash_seconds": 3
+}

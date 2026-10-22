@@ -1,0 +1,44 @@
+[
+  {
+    "file": "signage.py",
+    "target": "/opt/pi5-signage/signage.py",
+    "original_sha256": "7649f2b7dff30e1991b6e5ed2bbd5a0d4d3d5274dbf7564d3264586ff3cd5826",
+    "sha256": "024965940d589bd2e25be6282b8da7dad789441ff77db856a85e149d088fae45"
+  },
+  {
+    "file": "drm_power.py",
+    "target": "/opt/pi5-signage/drm_power.py",
+    "original_sha256": null,
+    "sha256": "c197a2af5d928f7e779edb125b97f752fccbf562df68ebdd3fc23fcf5d8e50ff"
+  },
+  {
+    "file": "drm_splash.py",
+    "target": "/opt/pi5-signage/drm_splash.py",
+    "original_sha256": null,
+    "sha256": "2c56748894c5024b7fb1d1fb1b97367dc0ade8a94538ed3a86069cda1c6abb16"
+  },
+  {
+    "file": "splash.sh",
+    "target": "/opt/pi5-signage/splash.sh",
+    "original_sha256": "365e13b55bcd9de0146e4e6774181853152d87e41a1c8a8db1d44dfee98858f5",
+    "sha256": "ef285bd7913ab0093a33e6ec655954ed80eb1cf41c8b39da220c9e160d4d73db"
+  },
+  {
+    "file": "pi5-signage.service",
+    "target": "/etc/systemd/system/pi5-signage.service",
+    "original_sha256": "c47cbb63d7a47dce22b5f532ee2e9c451fc8c738371b19fe09d1b47a7e9d0c5e",
+    "sha256": "ea2caa4c1b34cabed992db542a351638b9c4230b241d51f486b992d8eeae1121"
+  },
+  {
+    "file": "config.json",
+    "target": "/etc/pi5-signage.json",
+    "original_sha256": "ba9d68ba962d5412f6e61c0c96389315a23b366e545be217a558dfe27e15868e",
+    "sha256": "8cf021d83f234c20414e52bc707fe1b4e071fc60790ff1a0ee56adc526ce9220"
+  },
+  {
+    "file": "server.py",
+    "target": "/home/pi/museum_signage/server.py",
+    "original_sha256": "960c4b4ee42b9868dc7cbbf279575a69887a0ac5356c4bf127fcd0f96df4a712",
+    "sha256": "d34a28ae504ed665986e5c28d7b1fa48a8d17421061ff10ae999506f357344e3"
+  }
+]

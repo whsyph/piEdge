@@ -1,75 +1,103 @@
-# Pi 5 signage 4K60
+# caPIbarra-lite — Pi4 Direct DRM
 
-Pemutar signage satu layar untuk Raspberry Pi 5 1 GB. Menggunakan Raspberry Pi OS Lite 64-bit, labwc/Wayland dengan mpv hardware decode, dan Python standard library sebagai pengawas jadwal. Tidak memakai browser. Video disimpan lokal dan diputar berulang selama 24 jam.
+**Branch khusus Pi4: `capibarra-lite-pi4`. Jangan merge profil hardware ini ke
+branch Pi5 `capibarra-lite`.** Folder kerja Pi4 juga terpisah dari folder Pi5.
 
-Ini proyek baru yang mengambil kebutuhan dasar dari [piEdge](https://github.com/whsyph/piEdge), bukan migrasi CMS dua layar beserta API-nya. Pada Pi 5, jalur yang ditargetkan adalah video **HEVC/H.265 3840×2160 60 fps**; codec lain tidak dijanjikan lancar pada 4K60. Raspberry Pi menyatakan Pi 5 mempunyai decoder HEVC 4K60 dan output HDMI 4K60. Kemampuan aktual tetap harus diuji pada layar, kabel, file, dan versi OS yang digunakan.
+Ini checkpoint deployment yang sudah berjalan pada Raspberry Pi 4 Model B,
+bukan installer umum untuk perangkat kosong. Kode, unit, konfigurasi teknis,
+CMS dan aset UI disalin dari deployment Pi4 yang diverifikasi. Data operator,
+media, credential dan backup perangkat tidak disertakan.
 
-## Konfigurasi bawaan
+## Profil Pi4
 
-- Aktif 24 jam, dari **00:00–23:59** menurut waktu lokal Pi (`Asia/Jakarta` bila dikonfigurasi demikian).
-- Satu layar di `HDMI-A-1` (port HDMI0, port dekat USB-C daya).
-- Audio dimatikan; bisa diaktifkan lewat `config.json`.
-- Playlist CMS yang ditugaskan ke `screen1` dibaca dari `public/playlists.json`; perubahan playlist diterapkan pada putaran video berikutnya.
-- Jika mpv keluar atau gagal, pengawas mencoba file berikutnya dengan jeda. `systemd` menghidupkan kembali pengawas setelah crash/reboot.
-- Saat boot atau restart service, splash screen caPIbarra tampil selama sekitar 5 detik sebelum mpv signage mengambil alih layar.
+- mpv GPU context **DRM**, interop **drmprime-overlay**, hardware decode **DRM**.
+- Hardware video plane **primary** dan drawing/OSD plane **overlay**.
+- Konten yang diuji: **HEVC Main10, 3840×2160 ~60fps, AAC stereo**.
+- Display yang diuji mengiklankan **1080p60**; sumber UHD diperkecil oleh hardware.
+  Output HDMI 2160p60 belum dikualifikasi pada layar ini.
+- labwc/Wayland tidak dijalankan untuk profil ini.
+- Nama service tetap **`pi5-signage.service`** hanya sebagai kontrak kompatibilitas
+  CMS/sudo yang sudah terpasang. Nama tersebut **bukan** pemilihan profil Pi5.
 
-## Persiapan Pi
+## Hasil yang terverifikasi
 
-Gunakan Raspberry Pi OS Lite **64-bit** yang masih didukung, HDMI 2.0 dan kabel yang mampu 4K60, catu daya resmi 27 W atau yang setara, serta pendinginan aktif untuk operasi 24 jam sehari. Atur zona waktu dan jam otomatis:
+- Interval final: **61,010 detik wall / 61,044 detik video**, **0 tambahan dropped
+  frame**, hardware decoding aktif dan A/V offset sampel mendekati nol.
+- Ada tujuh drop startup sebelum interval; bukan klaim zero-drop sejak launch.
+- ON/OFF/AUTO, sleep/wake native DPMS, mute/unmute, restart API/browser dan loop
+  playlist diuji pada Pi4.
+- Reboot nyata diuji: service aktif otomatis, override reset AUTO dan sleep sesuai
+  jadwal; setelah itu ON dikembalikan untuk pengamatan operator.
+- Operator mengonfirmasi playback sudah smooth setelah integrasi. Uji semalam
+  penuh belum dilakukan; jangan menganggap checkpoint ini sertifikasi semua
+  layar, konten, HDR, output UHD HDMI atau transisi gapless.
 
-```bash
-sudo timedatectl set-timezone Asia/Jakarta
-timedatectl status
+## Batas preview
+
+Capture langsung melalui mpv terbukti memicu audio underrun/dropped frame.
+Pada profil direct DRM, CMS menampilkan **keterangan preview tidak tersedia**,
+bukan gambar lama yang diklaim live. Kontrol mode/audio/restart tetap tersedia.
+Jalur preview Wayland dipertahankan di kode untuk kompatibilitas rollback.
+
+## Isi source snapshot
+
+```text
+candidate/                 Payload source yang sama dengan Pi4 terpasang
+  signage.py               Supervisor, jadwal, playlist, IPC dan direct DRM
+  drm_power.py             Lease DRM/DPMS selama sleep
+  drm_splash.py, splash.sh  Splash direct DRM yang terbatas durasinya
+  pi5-signage.service      Unit khusus Pi4; nama lama dipertahankan
+  config.json              Contoh konfigurasi teknis profil, bukan jadwal/state
+  server.py                CMS Pi4 dengan guard preview aman
+  public/                  Kode/aset UI saja; tanpa runtime JSON
+manifest.json              Hash payload dan guard baseline perangkat
+install.py                 Migrasi terjaga + rollback untuk baseline yang cocok
+verify_live.py             Uji kontrol pada perangkat (mengubah mode sementara)
+probe_final.py             Uji performa pada perangkat
+preview-manifest.json      Guard revisi CMS pada deployment yang ada
+profile.json               Identitas target Pi4 yang eksplisit
+tests/                     Regresi profil dan isolasi target/payload
+docs/                      Implementasi, bukti tes, progress dan rollback
 ```
 
-Jangan menjalankan service piEdge lama yang memakai layar yang sama secara bersamaan. Cek dulu:
+## Verifikasi lokal
 
 ```bash
-systemctl list-units --type=service 'layar*' 'labwc*' 'cms-signage*'
+python -m unittest discover -s tests -v
+node --check candidate/public/app.js
+node --check candidate/public/operation-ui.js
+git diff --check
 ```
 
-Jika service pemutar lama aktif atau masih enabled, nonaktifkan dulu dengan `sudo systemctl disable --now <nama-service>`. Installer akan menolak pemasangan bila salah satu dari `layar1`, `layar2`, atau `layar-gabungan` masih aktif/enabled; ia tidak mengubah service lama secara otomatis.
+Unit test menjalankan mock untuk batas hardware. Bukti pengujian fisik terpisah
+ada di `docs/02-verification.md`; lulus unit test tidak menggantikan tes layar.
+`git diff --check` menandai whitespace lama pada beberapa file yang diimpor.
+Byte payload sengaja dipertahankan agar sama dengan deployment terverifikasi;
+.gitattributes mencegah perubahan line ending otomatis. Cleanup format bukan
+bagian checkpoint ini dan perlu regenerasi hash bila dilakukan kemudian.
 
-## Instalasi
+## Deployment / rollback
 
-Salin proyek ini ke Pi, lalu dari folder proyek:
+**Jangan menjalankan installer Pi5 dari branch lain pada Pi4 ini.** `install.py`
+memeriksa model Pi4 dan hash baseline sebelum menulis file atau mengubah service.
+Ia sengaja menolak perangkat/model atau source yang tidak cocok, termasuk source
+yang sudah dimigrasikan. File `candidate/public/` disimpan sebagai snapshot source
+UI; installer migrasi mengasumsikan CMS/UI baseline sudah ada, bukan menyediakan
+fresh-install universal. Splash PPM yang sudah dihasilkan di perangkat tidak
+ditimpa atau dimasukkan sebagai data runtime ke Git.
 
-```bash
-sudo bash install.sh
-```
+Petunjuk operasional dan perintah rollback deployment saat ini:
+`docs/03-operations.md`. Jangan mengganti playlist, schedules, audio preferences,
+operation mode atau media saat deploy kode.
 
-Installer menyalin aplikasi ke `/opt/pi5-signage`, konfigurasi awal ke `/etc/pi5-signage.json`, membuat user sistem `pi5-signage`, dan membuat folder `/var/lib/pi5-signage/videos`. Instalasi pertama mengaktifkan service tetapi **tidak langsung memulai** hingga media sudah dimasukkan.
+## Pemisahan versi
 
-Contoh memasukkan media dan menjalankan:
+| Target | Branch | Runtime |
+|---|---|---|
+| **Pi4** | **`capibarra-lite-pi4`** | **Direct DRM hardware-plane; snapshot ini** |
+| Pi5 | `capibarra-lite` | Profil Pi5 terpisah; tidak diubah oleh commit Pi4 |
 
-```bash
-sudo cp Odyssey4K60p.mp4 /var/lib/pi5-signage/videos/
-sudo chmod 644 /var/lib/pi5-signage/videos/Odyssey4K60p.mp4
-sudo systemctl start pi5-signage.service
-sudo systemctl status pi5-signage.service
-journalctl -u pi5-signage.service -f
-```
-
-Ubah port/audio di `/etc/pi5-signage.json`, lalu `sudo systemctl restart pi5-signage.service`. Dengan konfigurasi bawaan 24 jam, bila boot terjadi dan media tersedia, pengawas langsung memulai video.
-
-## Pemeriksaan 4K60
-
-```bash
-cat /proc/device-tree/model
-ip -br -4 addr
-for c in /sys/class/drm/card*-HDMI-A-*/status; do echo "$c: $(cat "$c")"; done
-kmsprint -m
-ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height,avg_frame_rate -of default=noprint_wrappers=1 /var/lib/pi5-signage/videos/Odyssey4K60p.mp4
-journalctl -u pi5-signage.service -b --no-pager
-```
-
-`ffprobe` tersedia dari paket `ffmpeg` bila ingin dipasang untuk diagnostik. Pastikan layar menegosiasikan 3840×2160 pada 60 Hz, file berisi HEVC 60 fps, dan log VLC tidak menunjukkan kegagalan decoder/DRM. Lakukan uji tayang penuh minimal 12 jam dengan file produksi sebelum dipakai tanpa pengawasan. Service memakai `tty1`; login lokal masih dapat dilakukan pada terminal virtual lain atau lewat SSH.
-
-## Jaringan perangkat yang disebutkan
-
-API piEdge pada perangkat mengembalikan `eth0 = 192.168.88.145` dan `wlan0 = 192.168.88.132` pada saat diperiksa. DHCP bisa mengubahnya. Akses SSH belum tersedia dari lingkungan pengembangan ini, jadi proyek ini belum dipasang ke Pi.
-
-## Referensi
-
-- [Spesifikasi decoder dan output Pi 5](https://www.raspberrypi.com/documentation/computers/processors.html)
-- [VLC pada Raspberry Pi OS Lite, termasuk opsi output DRM](https://www.raspberrypi.com/documentation/computers/os.html#play-audio-and-video-on-raspberry-pi-os-lite)
+Riwayat Git mempunyai ancestor bersama, tetapi tree dan payload pada branch ini
+hanya profil Pi4. Penggabungan lintas board harus berupa port yang disengaja dan
+diuji, bukan merge seluruh tree hardware. Worktree Pi5 yang memiliki perubahan
+packaging lokal tidak disentuh.

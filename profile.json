@@ -1,0 +1,13 @@
+{
+  "target": "raspberry-pi-4-model-b",
+  "branch": "capibarra-lite-pi4",
+  "renderer": "drmprime-overlay",
+  "gpu_context": "drm",
+  "service": "pi5-signage.service",
+  "service_name_is_legacy_compatibility": true,
+  "snapshot": "2026-10-23",
+  "validation": "on-device controls, reboot and bounded playback verified; operator confirmed smooth; extended burn-in pending",
+  "separate_pi5_branch": "capibarra-lite",
+  "live_capture_available": false,
+  "source_tree": "candidate"
+}

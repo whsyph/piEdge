@@ -1,0 +1,2 @@
+# This is a byte-verified deployment payload: never auto-convert its line endings.
+candidate/** -text
