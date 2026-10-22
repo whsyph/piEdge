@@ -2,6 +2,7 @@
 """Small scheduled mpv supervisor for a single Raspberry Pi Wayland output."""
 
 import argparse
+import os
 import json
 import logging
 import signal
@@ -60,18 +61,36 @@ def playlist_files(config):
     return resolved
 
 
+def cms_mute(path, config):
+    """Persist CMS global/per-clip mute across player launches."""
+    fallback = not config.get("audio", False)
+    try:
+        source = Path(config.get("schedules_file", "/home/pi/museum_signage/public/schedules.json")).with_name("audio_config.json")
+        data = json.loads(source.read_text())
+        audio = data.get(config.get("playlist_screen", "screen1"), {})
+        global_mute = audio.get("global_mute", fallback)
+        clip_mute = audio.get("clip_settings", {}).get(Path(path).name, {}).get("mute", False)
+        if not isinstance(global_mute, bool) or not isinstance(clip_mute, bool):
+            return fallback
+        return fallback or global_mute or clip_mute
+    except (OSError, ValueError, TypeError, AttributeError):
+        return fallback
+
+
 def command_for(path, config):
     command = [
-        "mpv", "--vo=gpu", "--gpu-context=wayland", "--hwdec=auto-safe",
+        "mpv", "--vo=dmabuf-wayland", "--hwdec=auto-safe",
         "--hwdec-codecs=hevc,h264,vp9,av1", "--hwdec-extra-frames=16",
         "--msg-level=all=info",
         "--term-status-msg=",
         "--video-sync=audio", "--framedrop=vo", "--no-osc", "--osd-level=0",
         "--no-border", "--fullscreen", "--fs-screen=0", "--keep-open=no",
         "--no-input-default-bindings", "--wayland-app-id=capibarra",
+        "--input-ipc-server=/run/user/1000/capibarra-mpv.sock",
+        "--mute=" + ("yes" if cms_mute(path, config) else "no"),
     ]
     if config["audio"]:
-        command.extend(["--audio-device", config["audio_device"]])
+        command.append("--audio-device=" + config["audio_device"])
     else:
         command.append("--mute=yes")
     return command + ["--", str(path)]
@@ -143,7 +162,21 @@ def schedules_allow(config):
     return curr_time >= wake or curr_time < sleep
 
 
+def operation_mode(config):
+    try:
+        boot = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+        path = Path(config.get("schedules_file", "/home/pi/museum_signage/public/schedules.json")).with_name("operation_mode.json")
+        data = json.loads(path.read_text())
+        mode = data.get("mode")
+        return mode if data.get("boot_id") == boot and mode in ("auto", "on", "off") else "auto"
+    except (OSError, ValueError, AttributeError, TypeError):
+        return "auto"
+
+
 def allowed_now(config):
+    mode = operation_mode(config)
+    if mode != "auto":
+        return mode == "on"
     if not in_window(datetime.now(), config["start"], config["end"]):
         return False
     if not schedules_allow(config):
@@ -172,9 +205,13 @@ def set_output(enabled: bool, display: str):
         env.setdefault("XDG_RUNTIME_DIR","/run/user/1000")
         env.setdefault("WAYLAND_DISPLAY","wayland-0")
         import subprocess
-        subprocess.run(cmd, env=env, timeout=5, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except Exception:
-        pass
+        result = subprocess.run(cmd, env=env, timeout=5, capture_output=True, text=True)
+        if result.returncode:
+            LOG.error("Output command failed: %s", result.stderr)
+        return result.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        LOG.exception("Output command unavailable")
+        return False
 
 def play(path, config):
     LOG.info("Playing %s", path.name)
@@ -197,17 +234,17 @@ def play(path, config):
 
 
 def run(config):
-    hdmi_on=True
+    hdmi_on=None
     while not STOP:
         if not allowed_now(config):
-            if hdmi_on:
-                set_output(False, config["display"])
-                hdmi_on=False
+            if hdmi_on is not False:
+                if set_output(False, config["display"]):
+                    hdmi_on=False
             time.sleep(1)
             continue
-        if not hdmi_on:
+        if hdmi_on is not True:
             set_output(True, config["display"])
-            hdmi_on=True
+            hdmi_on=None
         files = playlist_files(config)
         if not files:
             LOG.warning("No media in %s", config["media_dir"])
