@@ -30,7 +30,40 @@ systemctl list-units --type=service 'layar*' 'labwc*' 'cms-signage*'
 
 Jika service pemutar lama aktif atau masih enabled, nonaktifkan dulu dengan `sudo systemctl disable --now <nama-service>`. Installer akan menolak pemasangan bila salah satu dari `layar1`, `layar2`, atau `layar-gabungan` masih aktif/enabled; ia tidak mengubah service lama secara otomatis.
 
-## Instalasi
+## Fresh installation v1 (player only, local candidate)
+
+Requires Python 3, Raspberry Pi OS **Bookworm 64-bit**, Pi 5 Model B, systemd,
+and an existing `pi` account with UID 1000 (configure in Raspberry Pi Imager).
+No CMS or password provisioning. From this reviewed local checkout:
+
+```bash
+python3 install-fresh.py --check
+sudo python3 install-fresh.py
+```
+
+Preflight is read-only and rejects existing deployments/config/media and competing
+display owners. Installation uses apt and creates `/opt/pi5-signage`,
+`/etc/pi5-signage.json`, and `/var/lib/pi5-signage/videos`. The fresh config scans
+local media without CMS playlist/schedule files. Playback is neither started nor
+enabled, including after reboot. After adding readable media, explicitly run
+`sudo systemctl start pi5-signage.service`; enable it separately only if wanted.
+The existing renderer and legacy installer remain separate and unchanged.
+
+`bootstrap.py` is a common **unprivileged** Python 3/git dispatcher. It fetches the
+Pi 5 `capibarra-lite` or Pi 4 `capibarra-lite-pi4` branch into a new directory, shows
+the commit, runs its fresh preflight, then uses interactive sudo only for install.
+The downloadable bootstrap URL is **unavailable until publication**; both branches
+must publish `install-fresh.py` first. After publication, local invocation is
+`python3 bootstrap.py --repo-url https://github.com/whsyph/piEdge --check`
+(omit `--check` to install; use a new `--dir` each time). Bootstrap check downloads
+a checkout but does not install. Review/trust the selected source before sudo.
+
+No hardware installation/boot/playback acceptance is claimed. A failed install
+can leave packages/files; it refuses reruns rather than overwriting that state.
+Resolve failures manually. The older notes below describe the legacy flow, not
+the fresh installer.
+
+## Instalasi (legacy release flow)
 
 Salin proyek ini ke Pi, lalu dari folder proyek:
 
