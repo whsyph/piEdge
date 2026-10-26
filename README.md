@@ -76,6 +76,27 @@ Byte payload sengaja dipertahankan agar sama dengan deployment terverifikasi;
 .gitattributes mencegah perubahan line ending otomatis. Cleanup format bukan
 bagian checkpoint ini dan perlu regenerasi hash bila dilakukan kemudian.
 
+## Fresh install player-only (v1, belum diverifikasi pada hardware)
+
+Jalur ini terpisah dari migrasi `install.py`. Target wajib Raspberry Pi 4 Model B,
+Raspberry Pi OS Bookworm 64-bit (`aarch64`), systemd, dan user `pi` UID 1000.
+Ia menolak `/opt/pi5-signage`, `/etc/pi5-signage.json`, atau unit yang sudah ada
+sebelum apt atau mutasi lain. Media lokal berada di `/var/lib/pi5-signage/videos`;
+tidak ada CMS atau ketergantungan JSON CMS.
+
+```bash
+python3 install-fresh.py --check          # read-only
+sudo python3 install-fresh.py             # fresh install
+# setelah konfigurasi dan inspeksi operator:
+sudo systemctl start pi5-signage.service
+```
+
+Installer sengaja **tidak menjalankan atau enable service**. Reboot tidak memulai
+playback. Jika autostart kemudian memang diinginkan, operator dapat menjalankan
+`sudo systemctl enable pi5-signage.service` secara eksplisit. Dukungan direct DRM
+pada stock Bookworm, konektor/card DRM, audio, dan playback fisik masih belum
+diverifikasi pada perangkat baru; uji layar wajib sebelum enable.
+
 ## Deployment / rollback
 
 **Jangan menjalankan installer Pi5 dari branch lain pada Pi4 ini.** `install.py`
