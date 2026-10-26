@@ -3,6 +3,7 @@
 
 import argparse
 import os
+import re
 import json
 import logging
 import signal
@@ -14,6 +15,48 @@ from pathlib import Path
 LOG = logging.getLogger("pi5-signage")
 EXTENSIONS = {".mp4", ".mkv", ".mov"}
 STOP = False
+
+
+def detect_device_model(device_tree_path=Path("/proc/device-tree/model")):
+    """Read the board model from device-tree, or return empty string."""
+    try:
+        content = Path(device_tree_path).read_bytes().rstrip(b"\x00").decode("utf-8", errors="replace")
+        return content.strip()
+    except OSError:
+        return ""
+
+
+def resolve_profile_name(config, model_name=None):
+    """Resolve only known named profiles; unknown boards require an explicit profile."""
+    configured = config.get("profile")
+    if configured:
+        name = str(configured).lower()
+        if name not in {"pi5"}:
+            raise ValueError(f"Unknown profile: {configured}")
+        return name
+    model = (model_name if model_name is not None else detect_device_model()).strip().lower()
+    if re.fullmatch(r"raspberry pi 5(?: model b)?(?: rev \d+\.\d+)?", model):
+        return "pi5"
+    raise ValueError(f"Unsupported or unknown Raspberry Pi model: {model or 'unavailable'}; set profile explicitly")
+
+
+def load_profile(profile_name):
+    """Load a strictly named profile only from profiles/ beside this module."""
+    if profile_name not in {"pi5"}:
+        raise ValueError(f"Unknown profile: {profile_name}")
+    profile_path = Path(__file__).resolve().parent / "profiles" / f"{profile_name}.json"
+    if not profile_path.is_file():
+        raise ValueError(f"Missing profile file: {profile_path}")
+    data = json.loads(profile_path.read_text(encoding="utf-8"))
+    validate_profile(profile_name, data)
+    return data
+
+
+def validate_profile(name, data):
+    if not isinstance(data, dict) or data.get("target") != name or not isinstance(data.get("mpv"), dict):
+        raise ValueError(f"Invalid profile schema for {name}")
+    if data["mpv"] != {"vo": "dmabuf-wayland", "hwdec": "auto-safe", "hwdec_codecs": "hevc,h264,vp9,av1", "hwdec_extra_frames": 16, "video_sync": "audio", "framedrop": "vo"}:
+        raise ValueError(f"Invalid mpv output settings in {name}")
 
 
 def parse_clock(value):
@@ -98,6 +141,11 @@ def command_for(path, config):
 
 def load_config(path):
     config = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(config, dict):
+        raise ValueError("config must contain a JSON object")
+    profile_name = resolve_profile_name(config)
+    load_profile(profile_name)
+    config["_profile_name"] = profile_name
     config["media_dir"] = Path(config["media_dir"])
     config["start"] = parse_clock(config["start"])
     config["end"] = parse_clock(config["end"])
@@ -257,7 +305,7 @@ def run(config):
             try:
                 code = play(path, config)
             except OSError:
-                LOG.exception("Unable to start VLC")
+                LOG.exception("Unable to start mpv")
                 code = 1
             if code and not STOP and allowed_now(config):
                 LOG.warning("Playback failed for %s", path.name)
@@ -273,6 +321,8 @@ def main():
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     config = load_config(args.config)
+    if not args.check:
+        resolve_profile_name({}, detect_device_model())
     if args.check:
         print(f"Display: {config['display']}; files: {[p.name for p in playlist_files(config)]}")
         return

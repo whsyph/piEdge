@@ -4,7 +4,7 @@ import unittest
 from datetime import datetime, time
 from pathlib import Path
 
-from signage import command_for, in_window, load_config, media_files, playlist_files
+from signage import command_for, in_window, load_config, media_files, playlist_files, resolve_profile_name, load_profile
 from splash import generate
 
 
@@ -29,7 +29,7 @@ class SignageTests(unittest.TestCase):
             (folder / "ignore.txt").touch()
             config_path = folder / "config.json"
             config_path.write_text(json.dumps({
-                "media_dir": str(folder), "start": "08:00", "end": "20:00",
+                "profile": "pi5", "media_dir": str(folder), "start": "08:00", "end": "20:00",
                 "display": "HDMI-A-1", "audio": False,
                 "audio_device": "sysdefault:CARD=vc4hdmi0", "retry_seconds": 5,
             }), encoding="utf-8")
@@ -40,6 +40,16 @@ class SignageTests(unittest.TestCase):
             self.assertIn("--vo=dmabuf-wayland", command)
             self.assertIn("--mute=yes", command)
             self.assertEqual(command[-1], str(files[0]))
+
+    def test_profile_detection_is_strict(self):
+        self.assertEqual(resolve_profile_name({}, "Raspberry Pi 5 Model B Rev 1.0"), "pi5")
+        with self.assertRaises(ValueError): resolve_profile_name({}, "Raspberry Pi 4 Model B Rev 1.5")
+        with self.assertRaises(ValueError): resolve_profile_name({}, "Raspberry Pi 4 Compute Module")
+        with self.assertRaises(ValueError): resolve_profile_name({}, "unknown")
+
+    def test_profile_schema_and_named_only_loading(self):
+        self.assertEqual(load_profile("pi5")["target"], "pi5")
+        with self.assertRaises(ValueError): load_profile("../profiles/pi5")
 
     def test_splash_is_valid_ppm(self):
         with tempfile.TemporaryDirectory() as temp:

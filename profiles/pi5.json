@@ -1,0 +1,27 @@
+{
+  "target": "pi5",
+  "name": "Raspberry Pi 5 Baseline",
+  "compatible_models": [
+    "Raspberry Pi 5"
+  ],
+  "mpv": {
+    "vo": "dmabuf-wayland",
+    "hwdec": "auto-safe",
+    "hwdec_codecs": "hevc,h264,vp9,av1",
+    "hwdec_extra_frames": 16,
+    "video_sync": "audio",
+    "framedrop": "vo"
+  },
+  "display": {
+    "default_connector": "HDMI-A-1",
+    "target_resolution": "3840x2160",
+    "target_refresh_hz": 60,
+    "max_hwdec_streams_4k": 1
+  },
+  "validation": {
+    "status": "baseline_unverified",
+    "tested_device": null,
+    "verified_codecs": [],
+    "notes": "Renderer matches origin/capibarra-lite 135cc67; this packaging revision still requires board acceptance."
+  }
+}
