@@ -6,12 +6,34 @@ Ini proyek baru yang mengambil kebutuhan dasar dari [piEdge](https://github.com/
 
 ## Konfigurasi bawaan
 
-- Aktif 24 jam, dari **00:00–23:59** menurut waktu lokal Pi (`Asia/Jakarta` bila dikonfigurasi demikian).
+- Aktif 24 jam penuh (`"always_on": true`). Untuk membatasi jam tayang, hapus `always_on` (atau set `false`) dan atur `start`/`end` menurut waktu lokal Pi (`Asia/Jakarta` bila dikonfigurasi demikian).
+- Satu video di playlist diulang oleh mpv sendiri (`--loop-file=inf`) tanpa jeda relaunch; perubahan playlist tetap dideteksi tiap ±5 detik.
 - Satu layar di `HDMI-A-1` (port HDMI0, port dekat USB-C daya).
 - Audio dimatikan; bisa diaktifkan lewat `config.json`.
 - Playlist CMS yang ditugaskan ke `screen1` dibaca dari `public/playlists.json`; perubahan playlist diterapkan pada putaran video berikutnya.
 - Jika mpv keluar atau gagal, pengawas mencoba file berikutnya dengan jeda. `systemd` menghidupkan kembali pengawas setelah crash/reboot.
-- Saat boot atau restart service, splash screen caPIbarra tampil selama sekitar 5 detik sebelum mpv signage mengambil alih layar.
+- Saat boot atau restart manual service, splash screen caPIbarra tampil selama sekitar 5 detik sebelum mpv signage mengambil alih layar. Restart otomatis akibat crash dalam 2 menit terakhir melewati splash agar layar tidak berkedip berulang.
+- Sebelum splash, service menunggu soket Wayland (maks. 60 detik); `labwc.service` menunggu layar HDMI terhubung dan mencatat pesan penantian ke journal tiap ±30 detik.
+
+## Jadwal tayang (jendela)
+
+Jam tayang ditulis sebagai **jendela**, bukan pasangan wake/sleep:
+
+```json
+{
+  "timezone": "Asia/Jakarta",
+  "windows": [
+    {"days": ["Mon", "Tue", "Wed", "Thu", "Fri"], "start": "08:00", "end": "01:00"},
+    {"days": ["Sat"], "start": "10:00", "end": "22:00"}
+  ]
+}
+```
+
+- `days` adalah **hari mulai** jendela. Jika `end` lebih kecil dari `start`, jendela berlanjut ke hari berikutnya (contoh: Jumat 08:00 → Sabtu 01:00 adalah satu jendela milik Jumat). `end: "24:00"` berarti sampai tengah malam; `00:00`–`24:00` berarti sehari penuh. `start` sama dengan `end` ditolak.
+- Di luar semua jendela, layar **mati**. Hari yang tidak punya jendela mati seharian (log mencatat peringatan sekali). Untuk selalu menyala, pakai `"always_on": true`, yang tidak boleh digabung dengan `windows`.
+- `timezone` adalah nama IANA; semua hari dan jam dihitung di zona itu. Jika dikosongkan, dipakai zona waktu Pi. Paket `tzdata` harus ada (bawaan Raspberry Pi OS).
+- Sumber jadwal, urut prioritas: (1) `windows` di `schedules_file` CMS, (2) `windows` di `/etc/pi5-signage.json`, (3) aturan lama (`start`/`end`/`always_on` dan event wake/sleep CMS). Jika `schedules.json` berisi `windows` yang rusak atau tidak terbaca, jadwal valid terakhir tetap dipakai (bukan "izinkan"); bila belum ada, jatuh ke sumber berikutnya dan kesalahan dicatat di journal.
+- Mode manual `on`/`off` (`operation_mode.json`) tetap menimpa semuanya.
 
 ## Persiapan Pi
 
@@ -55,7 +77,7 @@ the commit, runs its fresh preflight, then uses interactive sudo only for instal
 The downloadable bootstrap URL is **unavailable until publication**; both branches
 must publish `install-fresh.py` first. After publication, local invocation is
 `python3 bootstrap.py --repo-url https://github.com/whsyph/piEdge --check`
-(omit `--check` to install; use a new `--dir` each time). Bootstrap check downloads
+(omit `--check` to install; use a new `--dir` each time; tambahkan `--commit <SHA 40 hex>` untuk mengunci ke commit yang sudah kamu tinjau, bukan ujung branch). Bootstrap check downloads
 a checkout but does not install. Review/trust the selected source before sudo.
 
 No hardware installation/boot/playback acceptance is claimed. A failed install
@@ -65,9 +87,12 @@ the fresh installer.
 
 ## Instalasi (legacy release flow)
 
-Salin proyek ini ke Pi, lalu dari folder proyek:
+`install.sh` hanya berjalan dari **paket rilis** (butuh `release.json` dan checksum), bukan dari checkout git mentah. Bangun paketnya di mesin dengan git, salin ke Pi, ekstrak, lalu jalankan dari folder hasil ekstrak:
 
 ```bash
+python3 scripts/build-release.py pi5          # menghasilkan dist/capibarra-lite-pi5-<versi>.tar.gz
+# di Pi, setelah menyalin dan mengekstrak tarball:
+cd capibarra-lite-pi5-<versi>
 sudo bash install.sh
 ```
 
@@ -96,7 +121,7 @@ ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,heigh
 journalctl -u pi5-signage.service -b --no-pager
 ```
 
-`ffprobe` tersedia dari paket `ffmpeg` bila ingin dipasang untuk diagnostik. Pastikan layar menegosiasikan 3840×2160 pada 60 Hz, file berisi HEVC 60 fps, dan log VLC tidak menunjukkan kegagalan decoder/DRM. Lakukan uji tayang penuh minimal 12 jam dengan file produksi sebelum dipakai tanpa pengawasan. Service memakai `tty1`; login lokal masih dapat dilakukan pada terminal virtual lain atau lewat SSH.
+`ffprobe` tersedia dari paket `ffmpeg` bila ingin dipasang untuk diagnostik. Pastikan layar menegosiasikan 3840×2160 pada 60 Hz, file berisi HEVC 60 fps, dan log mpv tidak menunjukkan kegagalan decoder/DRM. Lakukan uji tayang penuh minimal 12 jam dengan file produksi sebelum dipakai tanpa pengawasan. Service memakai `tty1`; login lokal masih dapat dilakukan pada terminal virtual lain atau lewat SSH.
 
 ## Jaringan perangkat yang disebutkan
 
@@ -105,4 +130,5 @@ API piEdge pada perangkat mengembalikan `eth0 = 192.168.88.145` dan `wlan0 = 192
 ## Referensi
 
 - [Spesifikasi decoder dan output Pi 5](https://www.raspberrypi.com/documentation/computers/processors.html)
-- [VLC pada Raspberry Pi OS Lite, termasuk opsi output DRM](https://www.raspberrypi.com/documentation/computers/os.html#play-audio-and-video-on-raspberry-pi-os-lite)
+- [Memutar audio dan video di Raspberry Pi OS Lite](https://www.raspberrypi.com/documentation/computers/os.html#play-audio-and-video-on-raspberry-pi-os-lite)
+- [Dokumentasi mpv (opsi `--vo`, `--hwdec`, IPC)](https://mpv.io/manual/stable/)

@@ -7,14 +7,22 @@ import re
 import json
 import logging
 import signal
+import socket
 import subprocess
 import time
 from datetime import datetime, time as clock_time, timedelta, timezone
+from functools import lru_cache
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 LOG = logging.getLogger("pi5-signage")
 EXTENSIONS = {".mp4", ".mkv", ".mov"}
 STOP = False
+IPC_SOCKET = "/run/user/1000/capibarra-mpv.sock"
+STALL_SECONDS = 30      # mpv position frozen this long => treat the player as hung
+FAST_FAIL_SECONDS = 10  # a non-zero exit sooner than this counts as a failed start
+FAIL_LIMIT = 3          # consecutive fast failures before a file is set aside
+BLOCK_SECONDS = 600     # how long a repeatedly failing file is skipped
 
 
 def detect_device_model(device_tree_path=Path("/proc/device-tree/model")):
@@ -55,8 +63,22 @@ def load_profile(profile_name):
 def validate_profile(name, data):
     if not isinstance(data, dict) or data.get("target") != name or not isinstance(data.get("mpv"), dict):
         raise ValueError(f"Invalid profile schema for {name}")
-    if data["mpv"] != {"vo": "dmabuf-wayland", "hwdec": "auto-safe", "hwdec_codecs": "hevc,h264,vp9,av1", "hwdec_extra_frames": 16, "video_sync": "audio", "framedrop": "vo"}:
+    mpv = data["mpv"]
+    text_keys = ("vo", "hwdec", "hwdec_codecs", "video_sync", "framedrop")
+    if not all(isinstance(mpv.get(k), str) and mpv[k] and not mpv[k].startswith("-") and "\n" not in mpv[k] for k in text_keys) \
+            or not isinstance(mpv.get("hwdec_extra_frames"), int) or isinstance(mpv["hwdec_extra_frames"], bool) \
+            or not 0 <= mpv["hwdec_extra_frames"] <= 64:
         raise ValueError(f"Invalid mpv output settings in {name}")
+
+
+def profile_mpv_args(config):
+    """mpv renderer flags come from the validated hardware profile (single source of truth)."""
+    mpv = load_profile(config.get("_profile_name", "pi5"))["mpv"]
+    return [
+        f"--vo={mpv['vo']}", f"--hwdec={mpv['hwdec']}",
+        f"--hwdec-codecs={mpv['hwdec_codecs']}", f"--hwdec-extra-frames={mpv['hwdec_extra_frames']}",
+        f"--video-sync={mpv['video_sync']}", f"--framedrop={mpv['framedrop']}",
+    ]
 
 
 def parse_clock(value):
@@ -107,8 +129,10 @@ def playlist_files(config):
 def cms_mute(path, config):
     """Persist CMS global/per-clip mute across player launches."""
     fallback = not config.get("audio", False)
+    if not config.get("schedules_file"):
+        return fallback  # player-only install: no CMS files to consult
     try:
-        source = Path(config.get("schedules_file", "/home/pi/museum_signage/public/schedules.json")).with_name("audio_config.json")
+        source = Path(config["schedules_file"]).with_name("audio_config.json")
         data = json.loads(source.read_text())
         audio = data.get(config.get("playlist_screen", "screen1"), {})
         global_mute = audio.get("global_mute", fallback)
@@ -120,18 +144,20 @@ def cms_mute(path, config):
         return fallback
 
 
-def command_for(path, config):
+def command_for(path, config, loop=False):
     command = [
-        "mpv", "--vo=dmabuf-wayland", "--hwdec=auto-safe",
-        "--hwdec-codecs=hevc,h264,vp9,av1", "--hwdec-extra-frames=16",
+        "mpv", *profile_mpv_args(config),
         "--msg-level=all=info",
         "--term-status-msg=",
-        "--video-sync=audio", "--framedrop=vo", "--no-osc", "--osd-level=0",
+        "--no-osc", "--osd-level=0",
         "--no-border", "--fullscreen", "--fs-screen=0", "--keep-open=no",
         "--no-input-default-bindings", "--wayland-app-id=capibarra",
-        "--input-ipc-server=/run/user/1000/capibarra-mpv.sock",
+        "--input-ipc-server=" + IPC_SOCKET,
         "--mute=" + ("yes" if cms_mute(path, config) else "no"),
     ]
+    if loop:
+        # Single-item playlist: let mpv loop in-process so there is no relaunch gap.
+        command.append("--loop-file=inf")
     if config["audio"]:
         command.append("--audio-device=" + config["audio_device"])
     else:
@@ -147,10 +173,17 @@ def load_config(path):
     load_profile(profile_name)
     config["_profile_name"] = profile_name
     config["media_dir"] = Path(config["media_dir"])
-    config["start"] = parse_clock(config["start"])
-    config["end"] = parse_clock(config["end"])
-    if config["start"] == config["end"]:
-        raise ValueError("start and end must differ")
+    if not isinstance(config.get("always_on", False), bool):
+        raise ValueError("always_on must be true or false")
+    if "windows" in config:
+        if config.get("always_on"):
+            raise ValueError("always_on cannot be combined with windows")
+        parse_windows(config)  # validate now; start/end are then optional
+    if "windows" not in config or "start" in config or "end" in config:
+        config["start"] = parse_clock(config["start"])
+        config["end"] = parse_clock(config["end"])
+        if "windows" not in config and not config.get("always_on") and config["start"] == config["end"]:
+            raise ValueError("start and end must differ (or set always_on)")
     if config["retry_seconds"] < 1:
         raise ValueError("retry_seconds must be >= 1")
     if not config["display"].startswith("HDMI-A-"):
@@ -210,10 +243,135 @@ def schedules_allow(config):
     return curr_time >= wake or curr_time < sleep
 
 
+DAY_INDEX = {"Mon": 0, "Tue": 1, "Wed": 2, "Thu": 3, "Fri": 4, "Sat": 5, "Sun": 6}
+_LOGGED = set()
+_LAST_GOOD = {}  # schedules_file path -> last successfully parsed window schedule
+
+
+def log_once(key, level, message, *args):
+    """Log a condition only the first time it appears (allowed_now runs every second)."""
+    if key not in _LOGGED:
+        _LOGGED.add(key)
+        LOG.log(level, message, *args)
+
+
+class WindowSchedule:
+    """Playback windows: each belongs to the day it STARTS on and may cross midnight."""
+
+    def __init__(self, tz, windows):
+        self.tz = tz  # None = the Pi's local timezone
+        self.windows = windows  # list of (frozenset(weekday), start_minute, duration_minutes)
+
+
+def _minutes(text, allow_24=False):
+    if not isinstance(text, str):
+        raise ValueError(f"time must be a string like 08:00, got {text!r}")
+    if allow_24 and text == "24:00":
+        return 1440
+    try:
+        parsed = clock_time.fromisoformat(text)
+    except ValueError:
+        raise ValueError(f"invalid time {text!r}; use HH:MM") from None
+    if parsed.second or parsed.microsecond or len(text) != 5:
+        raise ValueError(f"invalid time {text!r}; use HH:MM")
+    return parsed.hour * 60 + parsed.minute
+
+
+@lru_cache(maxsize=16)
+def _parse_windows(spec_json):
+    spec = json.loads(spec_json)
+    tz = None
+    if spec["timezone"] is not None:
+        if not isinstance(spec["timezone"], str):
+            raise ValueError("timezone must be an IANA name such as Asia/Jakarta")
+        try:
+            tz = ZoneInfo(spec["timezone"])
+        except (ZoneInfoNotFoundError, ValueError, OSError):
+            raise ValueError(f"unknown timezone {spec['timezone']!r}") from None
+    raw = spec["windows"]
+    if not isinstance(raw, list) or not raw or len(raw) > 200:
+        raise ValueError("windows must be a non-empty list (max 200)")
+    windows, covered = [], set()
+    for item in raw:
+        if not isinstance(item, dict):
+            raise ValueError("each window must be an object with days, start, end")
+        days = item.get("days")
+        if not isinstance(days, list) or not days or any(d not in DAY_INDEX for d in days):
+            raise ValueError(f"days must be a non-empty list of {sorted(DAY_INDEX, key=DAY_INDEX.get)}")
+        start, end = _minutes(item.get("start")), _minutes(item.get("end"), allow_24=True)
+        if start == end:
+            raise ValueError(f"window {item.get('start')}-{item.get('end')} has zero length; use 00:00-24:00 for a full day")
+        duration = end - start if end > start else end + 1440 - start
+        indexes = frozenset(DAY_INDEX[d] for d in days)
+        covered |= indexes
+        windows.append((indexes, start, duration))
+    missing = [name for name, index in DAY_INDEX.items() if index not in covered]
+    if missing:
+        log_once(("nowindow", spec_json), logging.WARNING,
+                 "No playback window starts on %s; the display stays off on those days unless a window from the previous day runs past midnight",
+                 ", ".join(missing))
+    return WindowSchedule(tz, windows)
+
+
+def parse_windows(spec):
+    """Validate a {'timezone': ..., 'windows': [...]} mapping; raises ValueError."""
+    try:
+        text = json.dumps({"timezone": spec.get("timezone"), "windows": spec.get("windows")}, sort_keys=True)
+    except (TypeError, ValueError, AttributeError):
+        raise ValueError("windows/timezone must be plain JSON values") from None
+    return _parse_windows(text)
+
+
+def windows_allow(schedule, now=None):
+    """True when `now` falls inside a window that started today or (overflowing midnight) yesterday."""
+    tz = schedule.tz or datetime.now().astimezone().tzinfo
+    now = datetime.now(tz) if now is None else now.astimezone(tz)
+    for back in (0, 1):
+        day = now.date() - timedelta(days=back)
+        for weekdays, start, duration in schedule.windows:
+            if day.weekday() not in weekdays:
+                continue
+            begin = datetime.combine(day, clock_time(0), tzinfo=tz) + timedelta(minutes=start)
+            if begin <= now < begin + timedelta(minutes=duration):
+                return True
+    return False
+
+
+def active_windows(config):
+    """Window schedule in force: the CMS schedules file wins, then config, else None (legacy rules)."""
+    source = config.get("schedules_file")
+    if source:
+        key = str(source)
+        try:
+            data = json.loads(Path(source).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = None
+            if key in _LAST_GOOD:
+                log_once(("unreadable", key), logging.WARNING, "Cannot read %s; keeping the last valid window schedule", key)
+                return _LAST_GOOD[key]
+        if isinstance(data, dict) and "windows" in data:
+            try:
+                schedule = parse_windows(data)
+            except ValueError as exc:
+                log_once(("invalid", key, str(exc)), logging.ERROR, "Invalid window schedule in %s: %s", key, exc)
+                if key in _LAST_GOOD:
+                    return _LAST_GOOD[key]
+            else:
+                _LAST_GOOD[key] = schedule
+                return schedule
+        else:
+            _LAST_GOOD.pop(key, None)
+    if "windows" in config:
+        return parse_windows(config)
+    return None
+
+
 def operation_mode(config):
+    if not config.get("schedules_file"):
+        return "auto"  # player-only install: no CMS operation_mode.json
     try:
         boot = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
-        path = Path(config.get("schedules_file", "/home/pi/museum_signage/public/schedules.json")).with_name("operation_mode.json")
+        path = Path(config["schedules_file"]).with_name("operation_mode.json")
         data = json.loads(path.read_text())
         mode = data.get("mode")
         return mode if data.get("boot_id") == boot and mode in ("auto", "on", "off") else "auto"
@@ -225,7 +383,10 @@ def allowed_now(config):
     mode = operation_mode(config)
     if mode != "auto":
         return mode == "on"
-    if not in_window(datetime.now(), config["start"], config["end"]):
+    schedule = active_windows(config)
+    if schedule is not None:
+        return windows_allow(schedule)
+    if not config.get("always_on") and not in_window(datetime.now(), config["start"], config["end"]):
         return False
     if not schedules_allow(config):
         return False
@@ -252,7 +413,6 @@ def set_output(enabled: bool, display: str):
         env=dict(os.environ)
         env.setdefault("XDG_RUNTIME_DIR","/run/user/1000")
         env.setdefault("WAYLAND_DISPLAY","wayland-0")
-        import subprocess
         result = subprocess.run(cmd, env=env, timeout=5, capture_output=True, text=True)
         if result.returncode:
             LOG.error("Output command failed: %s", result.stderr)
@@ -261,13 +421,58 @@ def set_output(enabled: bool, display: str):
         LOG.exception("Output command unavailable")
         return False
 
-def play(path, config):
+def mpv_time_pos(sock_path=None):
+    """Ask the running mpv for its playback position; None if unavailable."""
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.settimeout(1)
+            sock.connect(sock_path or IPC_SOCKET)
+            sock.sendall(b'{"command":["get_property","time-pos"]}\n')
+            buffer = b""
+            while buffer.count(b"\n") < 8:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                buffer += chunk
+                for line in buffer.split(b"\n")[:-1]:  # complete lines only
+                    reply = json.loads(line)
+                    if "error" in reply:  # events carry "event", the reply carries "error"
+                        value = reply.get("data")
+                        ok = reply["error"] == "success" and isinstance(value, (int, float))
+                        return float(value) if ok else None
+    except (OSError, ValueError, AttributeError):
+        pass
+    return None
+
+
+def play(path, config, loop_playlist=None):
+    """Play one file. With loop_playlist (the single-item list), mpv loops the
+    file itself and we restart only when the playlist or schedule changes."""
     LOG.info("Playing %s", path.name)
-    process = subprocess.Popen(command_for(path, config), start_new_session=True)
+    loop = loop_playlist is not None
+    process = subprocess.Popen(command_for(path, config, loop=loop), start_new_session=True)
+    replaced = False
+    last_check = last_poll = last_move = time.monotonic()
+    last_pos = None
     try:
         while process.poll() is None and not STOP:
             if not allowed_now(config):
                 break
+            now = time.monotonic()
+            if now - last_poll >= 5:
+                last_poll = now
+                pos = mpv_time_pos()
+                if pos is None or pos != last_pos:
+                    last_pos, last_move = pos, now
+                elif now - last_move >= STALL_SECONDS:
+                    LOG.error("mpv position frozen at %.1fs for %ss; killing hung player", pos, STALL_SECONDS)
+                    break
+            if loop and time.monotonic() - last_check >= 5:
+                last_check = time.monotonic()
+                if playlist_files(config) != loop_playlist:
+                    LOG.info("Playlist changed; restarting player")
+                    replaced = True
+                    break
             time.sleep(1)
     finally:
         if process.poll() is None:
@@ -278,24 +483,32 @@ def play(path, config):
                 process.kill()
                 process.wait()
         LOG.info("mpv exited with code %s", process.returncode)
-    return process.returncode
+    return 0 if replaced else process.returncode
 
 
 def run(config):
-    hdmi_on=None
+    hdmi_on = None
+    next_output_try = 0.0
+    failures, blocked = {}, {}
     while not STOP:
-        if not allowed_now(config):
-            if hdmi_on is not False:
-                if set_output(False, config["display"]):
-                    hdmi_on=False
+        wanted = allowed_now(config)
+        # Only touch the output when its state must change; retry failures at most every 30 s.
+        if hdmi_on is not wanted and time.monotonic() >= next_output_try:
+            if set_output(wanted, config["display"]):
+                hdmi_on = wanted
+            else:
+                next_output_try = time.monotonic() + 30
+        if not wanted:
             time.sleep(1)
             continue
-        if hdmi_on is not True:
-            set_output(True, config["display"])
-            hdmi_on=None
-        files = playlist_files(config)
-        if not files:
+        all_files = playlist_files(config)
+        if not all_files:
             LOG.warning("No media in %s", config["media_dir"])
+            wait_or_stop(30, config)
+            continue
+        files = [p for p in all_files if blocked.get(p, 0) <= time.monotonic()]
+        if not files:
+            LOG.warning("All playlist items are temporarily set aside after repeated failures")
             wait_or_stop(30, config)
             continue
         for path in files:
@@ -303,13 +516,22 @@ def run(config):
                 break
             started = time.monotonic()
             try:
-                code = play(path, config)
+                code = play(path, config, all_files if len(all_files) == 1 else None)
             except OSError:
                 LOG.exception("Unable to start mpv")
                 code = 1
-            if code and not STOP and allowed_now(config):
+            real_failure = bool(code) and not STOP and allowed_now(config)
+            if real_failure:
                 LOG.warning("Playback failed for %s", path.name)
-            # Avoid spinning on a corrupt file or a VLC/DRM startup failure.
+            if real_failure and time.monotonic() - started < FAST_FAIL_SECONDS:
+                failures[path] = failures.get(path, 0) + 1
+                if failures[path] >= FAIL_LIMIT:
+                    blocked[path] = time.monotonic() + BLOCK_SECONDS
+                    failures.pop(path)
+                    LOG.error("Setting %s aside for %ss after %s quick failures", path.name, BLOCK_SECONDS, FAIL_LIMIT)
+            elif not code:
+                failures.pop(path, None)
+            # Avoid spinning on a corrupt file or an mpv/DRM startup failure.
             if time.monotonic() - started < config["retry_seconds"]:
                 wait_or_stop(config["retry_seconds"], config)
 

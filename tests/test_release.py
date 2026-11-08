@@ -7,6 +7,8 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+# tarfile extraction filters exist only on newer Python patch releases.
+EXTRACT_KW = {'filter': 'data'} if hasattr(tarfile, 'data_filter') else {}
 sys.path.insert(0, str(ROOT / 'scripts'))
 from preflight import validate
 
@@ -15,7 +17,7 @@ class ReleaseTests(unittest.TestCase):
     def prepared_release(self, temp):
         subprocess.run([sys.executable, str(ROOT/'scripts/build-release.py'), 'pi5', '--dist', str(Path(temp)/'dist')], check=True, capture_output=True)
         archive = Path(temp)/'dist/capibarra-lite-pi5-0.2.0-rc1.tar.gz'
-        with tarfile.open(archive, 'r:gz') as tf: tf.extractall(Path(temp), filter='data')
+        with tarfile.open(archive, 'r:gz') as tf: tf.extractall(Path(temp), **EXTRACT_KW)
         return Path(temp)/'capibarra-lite-pi5-0.2.0-rc1'
 
     def test_preflight_rejects_package_mismatch(self):
@@ -48,7 +50,7 @@ class ReleaseTests(unittest.TestCase):
                 subprocess.run([sys.executable, str(ROOT/'scripts/build-release.py'), target, '--dist', tmp], check=True, capture_output=True, text=True)
                 archive = Path(tmp) / f'capibarra-lite-{target}-0.2.0-rc1.tar.gz'
                 with tarfile.open(archive, 'r:gz') as tar:
-                    tar.extractall(Path(tmp)/target, filter='data')
+                    tar.extractall(Path(tmp)/target, **EXTRACT_KW)
                 root = Path(tmp)/target/f'capibarra-lite-{target}-0.2.0-rc1'
                 manifest = json.loads((root/'release.json').read_text())
                 self.assertEqual(manifest['target'], target)

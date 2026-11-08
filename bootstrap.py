@@ -10,7 +10,9 @@ def detect(model):
     raise SystemExit('Only Raspberry Pi 4 or Raspberry Pi 5 is supported.')
 def main():
     p=argparse.ArgumentParser(); p.add_argument('--check', action='store_true'); p.add_argument('--model-file'); p.add_argument('--dir', default=str(pathlib.Path.home()/'capibarra-bootstrap')); p.add_argument('--repo-url', default='https://github.com/whsyph/piEdge.git', help='Source repository (default: official piEdge GitHub repository).')
+    p.add_argument('--commit', help='Pin to this full 40-hex commit SHA (must be on the board branch); recommended for reviewed installs.')
     a=p.parse_args()
+    if a.commit is not None and not re.fullmatch(r'[0-9a-f]{40}', a.commit): raise SystemExit('--commit must be a full 40-character lowercase hex SHA.')
     if getattr(os, 'geteuid', lambda: -1)() == 0: raise SystemExit('Run bootstrap as an ordinary user; sudo is requested only after preflight.')
     if not a.repo_url: raise SystemExit('Bootstrap URL is unavailable until publish; supply --repo-url after publication.')
     if not a.repo_url.startswith(('https://','ssh://','git@')): raise SystemExit('A trusted HTTPS/SSH repository URL is required.')
@@ -21,7 +23,10 @@ def main():
         raise SystemExit(f'{root} already exists; choose an unused --dir (no existing checkout is overwritten).')
     run(['git','clone','--no-checkout',a.repo_url,str(root)])
     run(['git','fetch','origin',branch], root)
-    run(['git','checkout','--detach',f'origin/{branch}'],root)
+    if a.commit:
+        if subprocess.run(['git','merge-base','--is-ancestor',a.commit,f'origin/{branch}'],cwd=root).returncode: raise SystemExit(f'{a.commit} is not part of origin/{branch}; nothing executed.')
+        run(['git','checkout','--detach',a.commit],root)
+    else: run(['git','checkout','--detach',f'origin/{branch}'],root)
     commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=root,text=True).strip(); print(f'{board} {branch} {commit}',flush=True)
     if not (root/'install-fresh.py').is_file(): raise SystemExit(f'{branch} has no install-fresh.py; nothing executed.')
     run([sys.executable,'install-fresh.py','--check'],root)

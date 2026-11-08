@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate a dependency-free PPM splash image for the Pi DRM output."""
+"""Generate a dependency-free binary PPM (P6) splash image for the Pi DRM output."""
 
 import argparse
 from pathlib import Path
@@ -17,7 +17,13 @@ FONT = {
 }
 
 
-def put_text(pixels: list[RGB], text: str, x: int, y: int, scale: int, color: RGB):
+def put_pixel(pixels: bytearray, x: int, y: int, color: RGB):
+    if 0 <= x < WIDTH and 0 <= y < HEIGHT:
+        offset = (y * WIDTH + x) * 3
+        pixels[offset:offset + 3] = bytes(color)
+
+
+def put_text(pixels: bytearray, text: str, x: int, y: int, scale: int, color: RGB):
     cursor = x
     for char in text:
         glyph = FONT.get(char, ["00000"] * 7)
@@ -26,9 +32,7 @@ def put_text(pixels: list[RGB], text: str, x: int, y: int, scale: int, color: RG
                 if bit == "1":
                     for dy in range(scale):
                         for dx in range(scale):
-                            px, py = cursor + col * scale + dx, y + row * scale + dy
-                            if 0 <= px < WIDTH and 0 <= py < HEIGHT:
-                                pixels[py * WIDTH + px] = color
+                            put_pixel(pixels, cursor + col * scale + dx, y + row * scale + dy, color)
         cursor += 6 * scale
 
 
@@ -36,21 +40,19 @@ def generate(path):
     bg = (10, 18, 31)
     accent = (64, 210, 190)
     white = (235, 245, 250)
-    pixels: list[RGB] = [bg] * (WIDTH * HEIGHT)
+    pixels = bytearray(bytes(bg) * (WIDTH * HEIGHT))
     # Simple centered accent bar and caPIbarra wordmark.
-    for y in range(HEIGHT // 2 - 100, HEIGHT // 2 + 100):
+    for y in range(HEIGHT // 2 - 4, HEIGHT // 2 + 5):
         for x in range(360, 1560):
-            if abs(y - HEIGHT // 2) < 5:
-                pixels[y * WIDTH + x] = accent
+            put_pixel(pixels, x, y, accent)
     text = "caPIbarra"
     scale = 24
     text_width = len(text) * 6 * scale
     put_text(pixels, text, (WIDTH - text_width) // 2, HEIGHT // 2 - 70, scale, white)
 
-    with Path(path).open("w", encoding="ascii", newline="\n") as handle:
-        handle.write(f"P3\n{WIDTH} {HEIGHT}\n255\n")
-        for index in range(0, len(pixels), WIDTH):
-            handle.write(" ".join(f"{r} {g} {b}" for r, g, b in pixels[index:index + WIDTH]) + "\n")
+    with Path(path).open("wb") as handle:
+        handle.write(f"P6\n{WIDTH} {HEIGHT}\n255\n".encode("ascii"))
+        handle.write(pixels)
 
 
 if __name__ == "__main__":
