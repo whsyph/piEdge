@@ -142,3 +142,19 @@ Default pemutar memakai `vo=dmabuf-wayland` + `hwdec=drm`. Pada sebagian panel (
 ```
 
 Ini tetap memakai decode hardware HEVC (`hwdec=drm-copy`), tetapi frame ditampilkan lewat GPU (`vo=gpu`, `--gpu-context=wayland`). Beban CPU sedikit lebih tinggi (±14% untuk 1080p24). 4K60 belum diverifikasi dengan renderer ini. Nilai tidak dikenal ditolak saat start, dan tanpa kunci `renderer` perilaku default tidak berubah.
+
+## Menyesuaikan video dengan layar (`fit`)
+
+Jika rasio layar berbeda dari rasio video (misalnya layar 1920×1200 16:10 dengan video 1920×1080 16:9), pilih perilakunya di `/etc/pi5-signage.json`:
+
+```json
+"fit": "cover"
+```
+
+| Nilai | Hasil | Catatan |
+|---|---|---|
+| `contain` (default) | Seluruh gambar terlihat, ada bidang hitam di tepi | Perilaku lama, tidak berubah |
+| `cover` | Layar terisi penuh, proporsi terjaga | Bagian yang melebihi layar terpotong (16:9 → 16:10 memotong ±10% lebar) |
+| `stretch` | Layar terisi penuh persis | Gambar tampak melar bila rasio berbeda |
+
+Nilai lain ditolak saat player start. Ubah file lalu `sudo systemctl restart pi5-signage`.

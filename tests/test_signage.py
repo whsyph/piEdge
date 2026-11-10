@@ -266,6 +266,27 @@ class SignageTests(unittest.TestCase):
             with self.assertRaises(ValueError, msg=override):
                 signage.validate_profile("pi5", dict(profile, renderers={"x": override}))
 
+    def test_fit_modes_map_to_mpv_flags_and_default_is_contain(self):
+        base = {"audio": False, "audio_device": "x"}
+        default = command_for(Path("a.mp4"), base)
+        self.assertFalse([a for a in default if a.startswith(("--panscan", "--keepaspect"))])
+        self.assertEqual(default, command_for(Path("a.mp4"), dict(base, fit="contain")))
+        self.assertIn("--panscan=1.0", command_for(Path("a.mp4"), dict(base, fit="cover")))
+        stretch = command_for(Path("a.mp4"), dict(base, fit="stretch"))
+        self.assertIn("--keepaspect=no", stretch)
+        self.assertNotIn("--panscan=1.0", stretch)
+
+    def test_unknown_fit_is_rejected_at_load(self):
+        import signage
+        for bad in ("zoom", 1, None, ["cover"]):
+            with tempfile.TemporaryDirectory() as temp:
+                path = Path(temp) / "c.json"
+                path.write_text(json.dumps({"profile": "pi5", "media_dir": temp, "always_on": True, "start": "00:00",
+                                            "end": "23:59", "display": "HDMI-A-1", "audio": False,
+                                            "audio_device": "x", "retry_seconds": 5, "fit": bad}), encoding="utf-8")
+                with self.assertRaises(ValueError, msg=bad):
+                    signage.load_config(path)
+
     def test_cms_playlist_order_and_assignment(self):
         with tempfile.TemporaryDirectory() as temp:
             folder = Path(temp)

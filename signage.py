@@ -180,6 +180,13 @@ def cms_mute(path, config):
         return fallback
 
 
+FIT_MODES = {
+    "contain": [],                      # whole picture visible, black bars when the aspect ratios differ (mpv default)
+    "cover": ["--panscan=1.0"],         # fill the screen, keep proportions, crop what overflows
+    "stretch": ["--keepaspect=no"],     # fill the screen exactly, distorts when the aspect ratios differ
+}
+
+
 def command_for(path, config, loop=False):
     command = [
         "mpv", *profile_mpv_args(config),
@@ -190,6 +197,7 @@ def command_for(path, config, loop=False):
         "--no-input-default-bindings", "--wayland-app-id=capibarra",
         "--input-ipc-server=" + IPC_SOCKET,
         "--mute=" + ("yes" if cms_mute(path, config) else "no"),
+        *FIT_MODES[config.get("fit", "contain")],
     ]
     if loop:
         # Single-item playlist: let mpv loop in-process so there is no relaunch gap.
@@ -213,6 +221,9 @@ def load_config(path):
         available = load_profile(profile_name).get("renderers", {})
         if not isinstance(renderer, str) or renderer not in available:
             raise ValueError(f"Unknown renderer {renderer!r}; available: {sorted(available)}")
+    fit = config.get("fit", "contain")
+    if not isinstance(fit, str) or fit not in FIT_MODES:
+        raise ValueError(f"fit must be one of {sorted(FIT_MODES)}, got {config.get('fit')!r}")
     config["media_dir"] = Path(config["media_dir"])
     if not isinstance(config.get("always_on", False), bool):
         raise ValueError("always_on must be true or false")
