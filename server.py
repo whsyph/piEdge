@@ -12,7 +12,8 @@ import urllib.parse
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 import time
 import threading
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, time as clock_time, timezone, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from media_check import ALLOWED_EXTENSIONS, check_upload, validate_upload_name
 
@@ -171,7 +172,8 @@ def ensure_dirs():
 
 def init_json_files():
     if not os.path.exists(SCHEDULES_FILE):
-        default_schedules = {"timezone_offset": 7, "events": []}
+        default_schedules = {"timezone": read_device_timezone(), "events": [],
+                             "windows": [{"days": list(DAYS), "start": "00:00", "end": "24:00"}]}
         write_json_atomic(SCHEDULES_FILE, default_schedules)
 
     if not os.path.exists(PLAYLISTS_FILE):
@@ -423,8 +425,150 @@ def validate_schedules(data):
             raise ValueError("event days must be a non-empty list of Mon..Sun")
         if event["type"] == "power" and event.get("action") not in ("sleep", "wake"):
             raise ValueError("power event action must be sleep or wake")
-    if "windows" in data and (not isinstance(data["windows"], list) or len(data["windows"]) > 200):
-        raise ValueError("windows must be a list (max 200)")
+    if "timezone" in data:
+        load_zone(data["timezone"])
+    if "windows" in data:
+        parse_windows(data)
+
+
+# --- Playback windows (same rules as the player's signage.py) ---
+# A window belongs to the day it STARTS on and may run past midnight; a day with no window is off.
+DAY_INDEX = {name: index for index, name in enumerate(DAYS)}
+DEFAULT_TIMEZONE = "Asia/Jakarta"
+OFFSET_ZONES = {7: "Asia/Jakarta", 8: "Asia/Makassar", 9: "Asia/Jayapura", 0: "UTC"}
+
+
+def load_zone(name):
+    if not isinstance(name, str) or not name:
+        raise ValueError("timezone must be an IANA name such as Asia/Jakarta")
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError, OSError):
+        raise ValueError(f"unknown timezone {name!r}") from None
+
+
+def zone_for_offset(offset):
+    """Name of an IANA zone for a legacy whole-hour offset (UTC+7 -> Asia/Jakarta)."""
+    try:
+        hours = int(offset)
+    except (TypeError, ValueError, OverflowError):
+        return DEFAULT_TIMEZONE
+    if hours in OFFSET_ZONES:
+        return OFFSET_ZONES[hours]
+    return f"Etc/GMT{-hours:+d}" if -12 <= hours <= 14 else DEFAULT_TIMEZONE
+
+
+def read_device_timezone():
+    try:
+        with open("/etc/timezone", "r", encoding="utf-8") as f:
+            name = f.read().strip()
+        load_zone(name)
+        return name
+    except (OSError, ValueError):
+        return DEFAULT_TIMEZONE
+
+
+def _window_minutes(text, allow_24=False):
+    if allow_24 and text == "24:00":
+        return 1440
+    if not isinstance(text, str) or not _CLOCK_RE.match(text):
+        raise ValueError(f"invalid time {text!r}; use HH:MM")
+    return int(text[:2]) * 60 + int(text[3:])
+
+
+def parse_windows(data):
+    """Validate {'timezone', 'windows'}; returns (tzinfo or None, [(weekday indexes, start, duration)])."""
+    tz = load_zone(data["timezone"]) if data.get("timezone") is not None else None
+    raw = data.get("windows")
+    if not isinstance(raw, list) or not raw or len(raw) > 200:
+        raise ValueError("windows must be a non-empty list (max 200); a screen that is never on needs no schedule")
+    windows, seen = [], set()
+    for item in raw:
+        if not isinstance(item, dict):
+            raise ValueError("each window must be an object with days, start, end")
+        days = item.get("days")
+        if not isinstance(days, list) or not days or any(d not in DAY_INDEX for d in days):
+            raise ValueError("window days must be a non-empty list of Mon..Sun")
+        start, end = _window_minutes(item.get("start")), _window_minutes(item.get("end"), allow_24=True)
+        if start == end:
+            raise ValueError("a window cannot start and end at the same time; use 00:00-24:00 for a full day")
+        indexes = frozenset(DAY_INDEX[d] for d in days)
+        if indexes & seen:
+            raise ValueError("each day can have only one window")
+        seen |= indexes
+        windows.append((indexes, start, end - start if end > start else end + 1440 - start))
+    return tz, windows
+
+
+def _window_allowed(windows, tz, at):
+    for back in (0, 1):
+        day = at.date() - timedelta(days=back)
+        for weekdays, start, duration in windows:
+            if day.weekday() in weekdays:
+                begin = datetime.combine(day, clock_time(0), tzinfo=tz) + timedelta(minutes=start)
+                if begin <= at < begin + timedelta(minutes=duration):
+                    return True
+    return False
+
+
+def schedule_state(data, now=None):
+    """Is the display meant to be on right now, and when does that change next?"""
+    now = now or datetime.now(timezone.utc)
+    if "windows" not in data:
+        return {"timezone": None, "now": None, "on": True, "next_change": None, "always": True}
+    tz, windows = parse_windows(data)
+    tz = tz or load_zone(read_device_timezone())
+    local = now.astimezone(tz)
+    on = _window_allowed(windows, tz, local)
+    edges = []
+    for offset in range(-1, 9):
+        day = local.date() + timedelta(days=offset)
+        for weekdays, start, duration in windows:
+            if day.weekday() in weekdays:
+                begin = datetime.combine(day, clock_time(0), tzinfo=tz) + timedelta(minutes=start)
+                edges += [begin, begin + timedelta(minutes=duration)]
+    next_change = None
+    for edge in sorted(set(edges)):
+        if edge > local and _window_allowed(windows, tz, edge) != on:
+            next_change = {"day": DAYS[edge.weekday()], "time": edge.strftime("%H:%M"),
+                           "date": edge.strftime("%Y-%m-%d")}
+            break
+    full = len(windows) and all(len(w[0]) == 7 and w[1] == 0 and w[2] == 1440 for w in windows)
+    return {"timezone": str(getattr(tz, "key", tz)), "now": local.strftime("%Y-%m-%d %H:%M"), "day": DAYS[local.weekday()],
+            "on": on, "next_change": next_change, "always": bool(full)}
+
+
+def migrate_schedules(data):
+    """Convert wake/sleep power events and timezone_offset to windows + timezone.
+
+    Returns the new schedules dict, or None when the file is already in the window format.
+    """
+    events = data.get("events", []) if isinstance(data.get("events"), list) else []
+    power = [e for e in events if isinstance(e, dict) and e.get("type") == "power"]
+    if "windows" in data and not power and "timezone_offset" not in data:
+        return None
+    result = {k: v for k, v in data.items() if k not in ("timezone_offset", "events")}
+    result["events"] = [e for e in events if e not in power]
+    result["timezone"] = data.get("timezone") or zone_for_offset(data.get("timezone_offset", 7))
+    if "windows" not in data:
+        by_span = {}
+        for day in DAYS:
+            wake = sleep = None
+            for event in power:
+                if not event.get("enabled", True) or day not in (event.get("days") or []):
+                    continue
+                if not isinstance(event.get("time"), str) or not _CLOCK_RE.match(event["time"]):
+                    continue
+                if event.get("action") == "wake":
+                    wake = event["time"] if wake is None or event["time"] < wake else wake
+                elif event.get("action") == "sleep":
+                    sleep = event["time"] if sleep is None or event["time"] > sleep else sleep
+            start, end = wake or "00:00", sleep or "24:00"
+            if start == end:
+                start, end = "00:00", "24:00"
+            by_span.setdefault((start, end), []).append(day)
+        result["windows"] = [{"days": days, "start": s, "end": e} for (s, e), days in by_span.items()]
+    return result
 
 
 def validate_playlists(data):
@@ -490,7 +634,10 @@ def schedule_tick(now=None):
 
     def mutate(data):
         try:
-            tz = timezone(timedelta(hours=float(data.get("timezone_offset", 7))))
+            if data.get("timezone"):
+                tz = load_zone(data["timezone"])
+            else:
+                tz = timezone(timedelta(hours=float(data.get("timezone_offset", 7))))
         except (TypeError, ValueError, OverflowError):
             tz = timezone(timedelta(hours=7))
         current = now.astimezone(tz) if now is not None else datetime.now(tz)
@@ -539,11 +686,25 @@ def check_schedules():
         time.sleep(30)
 
 
+def migrate_schedule_file():
+    """One-time upgrade of schedules.json from wake/sleep events to playback windows."""
+
+    def mutate(data):
+        upgraded = migrate_schedules(data) if isinstance(data, dict) else None
+        return NO_CHANGE if upgraded is None else upgraded
+
+    try:
+        update_json(SCHEDULES_FILE, mutate)
+    except (OSError, ValueError) as exc:
+        print(f"[Schedule] Could not upgrade schedules.json: {exc}")
+
+
 def startup():
     """Create folders/files, token and the schedule thread (kept out of import so tests can import)."""
     load_config()
     ensure_dirs()
     init_json_files()
+    migrate_schedule_file()
     migrate_existing_files()
     apply_network_config()
     apply_playlist_assignments()
@@ -835,6 +996,15 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
 
+    def _send_json(self, status, payload):
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_cors_headers()
+        self.end_headers()
+        self.wfile.write(body)
+
     def _json_error(self, status, message):
         body = json.dumps({"success": False, "error": message}).encode("utf-8")
         self.send_response(status)
@@ -917,6 +1087,9 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
 
         elif path == "/api/schedule/config":
             self.handle_api_schedule_config()
+            return
+        elif path == "/api/schedule/status":
+            self.handle_api_schedule_status()
             return
 
         elif path == "/api/playlists/list":
@@ -1674,6 +1847,14 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(data).encode("utf-8"))
         except Exception as e:
             self.send_error(500, str(e))
+
+    def handle_api_schedule_status(self):
+        try:
+            with open(SCHEDULES_FILE, "r", encoding="utf-8") as f:
+                state = schedule_state(json.load(f))
+            self._send_json(200, state)
+        except (OSError, ValueError) as exc:
+            self._json_error(500, f"schedule unreadable: {exc}")
 
     def handle_api_schedule_save(self):
         content_length = int(self.headers.get("Content-Length", 0))

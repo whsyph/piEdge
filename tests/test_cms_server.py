@@ -326,6 +326,21 @@ class CmsServerCase(unittest.TestCase):
             server.apply_playlist_assignments()
         self.assertTrue(True)  # smoke: legacy path executes without raising
 
+    def test_schedule_endpoints_send_exactly_one_response(self):
+        # Raw socket: a stray second response (e.g. a 404 page) would show up after the JSON body.
+        import socket
+        server.write_json_atomic(self.paths["SCHEDULES_FILE"], {"timezone": "Asia/Jakarta", "events": [],
+                                 "windows": [{"days": ["Mon"], "start": "09:00", "end": "17:00"}]})
+        for path in ("/api/schedule/config", "/api/schedule/status"):
+            with socket.create_connection(("127.0.0.1", self.port), timeout=5) as sock:
+                sock.sendall(f"GET {path} HTTP/1.0\r\nAuthorization: Bearer {TOKEN}\r\n\r\n".encode())
+                raw = b""
+                while chunk := sock.recv(4096):
+                    raw += chunk
+            head, _, body = raw.partition(b"\r\n\r\n")
+            self.assertTrue(head.startswith(b"HTTP/1.0 200") or head.startswith(b"HTTP/1.1 200"), head)
+            json.loads(body)  # raises if anything follows the JSON document
+
     # -- schedule / network / misc validation ----------------------------------------
     def test_schedule_save_validation_and_stamp_preservation(self):
         event = {"id": "e1", "type": "power", "action": "sleep", "time": "22:00", "days": ["Mon"], "enabled": True}
@@ -496,6 +511,94 @@ class ScheduleTickTests(unittest.TestCase):
 
     def test_missing_schedule_file_is_not_an_error(self):
         self.assertEqual(server.schedule_tick(datetime(2026, 11, 6, 2, 30, tzinfo=timezone.utc)), [])
+
+
+class WindowScheduleTests(unittest.TestCase):
+    """Playback windows: start-day ownership, midnight crossing, migration from wake/sleep."""
+
+    JAKARTA = {"timezone": "Asia/Jakarta", "events": []}
+
+    def state(self, windows, utc, tz="Asia/Jakarta"):
+        return server.schedule_state({"timezone": tz, "events": [], "windows": windows}, utc)
+
+    def test_midnight_window_belongs_to_the_day_it_starts(self):
+        windows = [{"days": ["Fri"], "start": "22:00", "end": "02:00"}]
+        fri_2330 = datetime(2026, 11, 6, 16, 30, tzinfo=timezone.utc)   # Fri 23:30 WIB
+        sat_0130 = datetime(2026, 11, 6, 18, 30, tzinfo=timezone.utc)   # Sat 01:30 WIB
+        sat_2330 = datetime(2026, 11, 7, 16, 30, tzinfo=timezone.utc)   # Sat 23:30 WIB
+        self.assertTrue(self.state(windows, fri_2330)["on"])
+        self.assertTrue(self.state(windows, sat_0130)["on"])
+        self.assertFalse(self.state(windows, sat_2330)["on"])           # Saturday has no window
+        self.assertEqual(self.state(windows, fri_2330)["next_change"], {"day": "Sat", "time": "02:00", "date": "2026-11-07"})
+
+    def test_next_change_skips_back_to_back_windows_and_off_days(self):
+        windows = [{"days": ["Mon"], "start": "09:00", "end": "24:00"},
+                   {"days": ["Tue"], "start": "00:00", "end": "24:00"},
+                   {"days": ["Wed"], "start": "00:00", "end": "10:00"}]
+        mon_noon = datetime(2026, 11, 9, 5, 0, tzinfo=timezone.utc)     # Mon 12:00 WIB
+        state = self.state(windows, mon_noon)
+        self.assertTrue(state["on"])
+        self.assertEqual(state["next_change"], {"day": "Wed", "time": "10:00", "date": "2026-11-11"})  # Mon 24:00 -> Tue 00:00 -> Wed 00:00 is seamless
+        off = self.state(windows, datetime(2026, 11, 12, 5, 0, tzinfo=timezone.utc))                   # Thu
+        self.assertFalse(off["on"])
+        self.assertEqual(off["next_change"], {"day": "Mon", "time": "09:00", "date": "2026-11-16"})
+
+    def test_full_week_window_is_reported_as_always_on(self):
+        state = self.state([{"days": list(server.DAYS), "start": "00:00", "end": "24:00"}], datetime(2026, 11, 9, 5, 0, tzinfo=timezone.utc))
+        self.assertTrue(state["on"] and state["always"])
+        self.assertIsNone(state["next_change"])
+
+    def test_validation_matches_the_player_rules(self):
+        ok = {"timezone": "Asia/Jakarta", "windows": [{"days": ["Mon"], "start": "09:00", "end": "24:00"}]}
+        server.validate_schedules(ok)
+        for bad in (
+            dict(ok, windows=[]),
+            dict(ok, windows=[{"days": ["Mon"], "start": "09:00", "end": "09:00"}]),
+            dict(ok, windows=[{"days": ["Mon"], "start": "24:00", "end": "10:00"}]),
+            dict(ok, windows=[{"days": [], "start": "09:00", "end": "10:00"}]),
+            dict(ok, windows=[{"days": ["Mon"], "start": "09:00", "end": "10:00"}, {"days": ["Mon", "Tue"], "start": "11:00", "end": "12:00"}]),
+            dict(ok, timezone="Mars/Olympus"),
+            dict(ok, timezone=7),
+        ):
+            with self.assertRaises(ValueError, msg=bad):
+                server.validate_schedules(bad)
+
+    def test_migration_converts_wake_sleep_and_offset(self):
+        power = [
+            {"id": "w", "type": "power", "action": "wake", "time": "08:00", "days": ["Mon", "Tue"], "enabled": True},
+            {"id": "s", "type": "power", "action": "sleep", "time": "02:00", "days": ["Mon", "Tue"], "enabled": True},
+            {"id": "o", "type": "power", "action": "sleep", "time": "20:00", "days": ["Wed"], "enabled": True},
+            {"id": "x", "type": "power", "action": "sleep", "time": "03:00", "days": ["Thu"], "enabled": False},
+            {"id": "p", "type": "playlist", "screen": 1, "playlist_name": "Show", "time": "09:00", "days": ["Mon"], "enabled": True},
+        ]
+        migrated = server.migrate_schedules({"timezone_offset": 8, "events": power})
+        self.assertEqual(migrated["timezone"], "Asia/Makassar")
+        self.assertNotIn("timezone_offset", migrated)
+        self.assertEqual([e["id"] for e in migrated["events"]], ["p"])
+        spans = {tuple(w["days"]): (w["start"], w["end"]) for w in migrated["windows"]}
+        self.assertEqual(spans[("Mon", "Tue")], ("08:00", "02:00"))   # crosses midnight
+        self.assertEqual(spans[("Wed",)], ("00:00", "20:00"))         # sleep only
+        self.assertEqual(spans[("Thu", "Fri", "Sat", "Sun")], ("00:00", "24:00"))  # no events: always, as before
+        server.validate_schedules(migrated)
+        self.assertIsNone(server.migrate_schedules(migrated))         # idempotent
+
+    def test_migrating_an_empty_default_file_means_always_on(self):
+        migrated = server.migrate_schedules({"timezone_offset": 7, "events": []})
+        self.assertEqual(migrated["windows"], [{"days": list(server.DAYS), "start": "00:00", "end": "24:00"}])
+        self.assertEqual(server.zone_for_offset(-5), "Etc/GMT+5")
+
+    def test_status_endpoint_and_startup_migration(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = str(Path(temp) / "schedules.json")
+            server.write_json_atomic(path, {"timezone_offset": 7, "events": [
+                {"id": "w", "type": "power", "action": "wake", "time": "08:00", "days": list(server.DAYS), "enabled": True}]})
+            with unittest.mock.patch.object(server, "SCHEDULES_FILE", path):
+                server.migrate_schedule_file()
+                saved = load(path)
+                self.assertEqual(saved["windows"], [{"days": list(server.DAYS), "start": "08:00", "end": "24:00"}])
+                before = os.stat(path).st_mtime_ns
+                server.migrate_schedule_file()
+                self.assertEqual(os.stat(path).st_mtime_ns, before)  # already migrated: untouched
 
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>caPIbarra CMS</title>
     <link rel="icon" type="image/png" href="logo.png">
-    <link rel="stylesheet" href="app.css?v=cms-hardening-2">
+    <link rel="stylesheet" href="app.css?v=schedule-windows-1">
 </head>
 
 <body>
@@ -519,40 +519,66 @@
 
                 <!-- TAB: PENJADWALAN -->
                 <div id="tab-schedule" class="tab-panel">
-                    <div class="section-header" style="display: flex; justify-content: space-between; align-items: flex-start;">
-                        <div>
-                            <h2 data-i18n="schedule_header">Jadwal Operasional</h2>
-                            <p data-i18n="schedule_sub">Atur jam hidup/mati otomatis dan jadwal pergantian playlist layar</p>
-                        </div>
-                        <button class="btn btn-primary" onclick="openScheduleModal()" data-i18n="btn_add_schedule">➕ Tambah Jadwal</button>
+                    <div class="section-header">
+                        <h2>Jadwal Tayang</h2>
+                        <p>Tentukan jam layar menayangkan video. Di luar jam itu layar mati sendiri.</p>
+                    </div>
+
+                    <div id="schedule-status" class="schedule-status schedule-status-unknown">
+                        <span id="schedule-status-badge" class="badge">...</span>
+                        <span id="schedule-status-text">Memuat status...</span>
                     </div>
 
                     <div class="schedule-card">
-                        <div class="form-group" style="max-width: 300px; margin-bottom: 20px;">
-                            <label for="tz-select" data-i18n="tz_select_label">Timezone (GMT Offset):</label>
-                            <select id="tz-select" class="form-select" onchange="saveTimezone()">
-                                <option value="7">UTC+7 (WIB / Jakarta)</option>
-                                <option value="8">UTC+8 (WITA / Bali)</option>
-                                <option value="9">UTC+9 (WIT / Jayapura)</option>
-                                <option value="0">UTC+0 (GMT / London)</option>
-                            </select>
+                        <div class="schedule-row">
+                            <div class="form-group">
+                                <label for="sch-tz">Zona waktu</label>
+                                <select id="sch-tz" class="form-select"></select>
+                            </div>
+                            <div class="schedule-clock">Jam di sana sekarang: <strong id="sch-tz-clock">--:--</strong></div>
                         </div>
 
+                        <div class="schedule-modes" role="radiogroup" aria-label="Mode jadwal">
+                            <label class="schedule-mode"><input type="radio" name="sch-mode" value="always"> <span><strong>Selalu menyala</strong><small>Tayang 24 jam, setiap hari</small></span></label>
+                            <label class="schedule-mode"><input type="radio" name="sch-mode" value="custom"> <span><strong>Atur jam per hari</strong><small>Pilih hari dan jam tayang</small></span></label>
+                        </div>
+
+                        <div id="sch-custom" class="hidden">
+                            <table class="device-table schedule-days">
+                                <thead>
+                                    <tr><th>Hari</th><th>Tayang</th><th>Mulai</th><th>Selesai</th><th></th></tr>
+                                </thead>
+                                <tbody id="sch-days-body"></tbody>
+                            </table>
+                            <div class="schedule-tools">
+                                <button type="button" class="btn btn-sm btn-secondary" id="sch-copy-mon">Samakan semua hari dengan Senin</button>
+                                <button type="button" class="btn btn-sm btn-secondary" id="sch-weekdays">Hanya Senin-Jumat</button>
+                            </div>
+                            <p class="schedule-hint">Kalau jam selesai lebih awal dari jam mulai, tayangan lanjut sampai besok pagi. Jam 00:00 di kolom Selesai berarti sampai tengah malam. Hari yang tidak dicentang layarnya mati.</p>
+                        </div>
+
+                        <p id="sch-summary" class="schedule-summary"></p>
+                        <p id="sch-error" class="schedule-error hidden" role="alert"></p>
+                        <div class="schedule-actions">
+                            <button type="button" class="btn btn-primary" id="sch-save">Simpan jadwal</button>
+                            <button type="button" class="btn btn-secondary hidden" id="sch-revert">Batalkan perubahan</button>
+                        </div>
+                    </div>
+
+                    <div class="section-header" style="display: flex; justify-content: space-between; align-items: flex-start; margin-top: 28px;">
+                        <div>
+                            <h3>Pergantian Playlist</h3>
+                            <p>Opsional: pindah ke playlist lain pada jam tertentu.</p>
+                        </div>
+                        <button class="btn btn-primary" onclick="openScheduleModal()">Tambah</button>
+                    </div>
+                    <div class="schedule-card">
                         <div class="device-list-box">
                             <table class="device-table">
                                 <thead>
-                                    <tr>
-                                        <th data-i18n="th_time">Waktu</th>
-                                        <th data-i18n="th_days">Hari</th>
-                                        <th data-i18n="th_type">Aksi</th>
-                                        <th data-i18n="th_target">Target</th>
-                                        <th data-i18n="th_status">Status</th>
-                                        <th data-i18n="th_action">Hapus</th>
-                                    </tr>
+                                    <tr><th>Waktu</th><th>Hari</th><th>Layar</th><th>Playlist</th><th>Status</th><th>Hapus</th></tr>
                                 </thead>
-                                <tbody id="schedule-table-body">
-                                    <!-- Dynamic rows -->
-                                </tbody>
+                                <tbody id="schedule-table-body"></tbody>
                             </table>
                         </div>
                     </div>
@@ -643,24 +669,8 @@
     <!-- Schedule Modal -->
     <div id="schedule-modal" class="modal hidden">
         <div class="modal-content">
-            <h3 data-i18n="modal_schedule_title">Tambah Jadwal Baru</h3>
-            <div class="form-group margin-top-md">
-                <label data-i18n="sch_type">Tipe Jadwal:</label>
-                <select id="sch-type" class="form-select" onchange="toggleScheduleForm()">
-                    <option value="power" data-i18n="sch_type_power">Power (Sleep/Wake Layar)</option>
-                    <option value="playlist" data-i18n="sch_type_playlist">Putar Playlist Video</option>
-                </select>
-            </div>
-            
-            <div id="sch-power-fields" class="form-group margin-top-sm">
-                <label data-i18n="sch_power_action">Aksi Power:</label>
-                <select id="sch-power-action" class="form-select">
-                    <option value="sleep" data-i18n="sch_act_sleep">Standby / Matikan TV (Sleep)</option>
-                    <option value="wake" data-i18n="sch_act_wake">Nyalakan TV (Wake)</option>
-                </select>
-            </div>
-
-            <div id="sch-playlist-fields" class="form-group margin-top-sm hidden">
+            <h3>Tambah Pergantian Playlist</h3>
+            <div id="sch-playlist-fields" class="form-group margin-top-md">
                 <label data-i18n="sch_screen_target">Layar Target:</label>
                 <select id="sch-screen" class="form-select">
                     <option value="1">Layar 1</option>
@@ -698,7 +708,7 @@
         </div>
     </div>
 
-    <script src="app.js?v=cms-hardening-1"></script>
+    <script src="app.js?v=schedule-windows-1"></script>
     <script src="operation-ui.js?v=2"></script>
 </body>
 

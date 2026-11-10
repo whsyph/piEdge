@@ -1761,7 +1761,7 @@ async function changeAudioChannel(screen) {
 }
 
 // --- Scheduling & Multiple Playlists Logic ---
-let schedulesData = { timezone_offset: 7, events: [] };
+let schedulesData = { timezone: "Asia/Jakarta", events: [] };
 let playlistsData = {
   playlists: { Default: [] },
   assignments: { screen1: "Default", screen2: "Default" },
@@ -1783,10 +1783,6 @@ async function fetchPlaylistsAndSchedules() {
     const sRes = await fetch(getApiUrl("/api/schedule/config"));
     if (sRes.ok) {
       schedulesData = await sRes.json();
-      const tzSelect = document.getElementById("tz-select");
-      if (tzSelect && document.activeElement !== tzSelect) {
-        tzSelect.value = schedulesData.timezone_offset || 7;
-      }
       updateScheduleUI();
       updateSchedulePlaylistOptions();
     }
@@ -2148,122 +2144,303 @@ async function assignPlaylistToScreen(screen, playlistName) {
   }
 }
 
-// Scheduling UI
+// Scheduling UI: playback windows (one per day) + optional playlist switches
+const DAY_KEYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const DAY_NAMES = { Mon: "Senin", Tue: "Selasa", Wed: "Rabu", Thu: "Kamis", Fri: "Jumat", Sat: "Sabtu", Sun: "Minggu" };
+const DAY_SHORT = { Mon: "Sen", Tue: "Sel", Wed: "Rab", Thu: "Kam", Fri: "Jum", Sat: "Sab", Sun: "Min" };
+const TZ_CHOICES = [
+  ["Asia/Jakarta", "WIB - Asia/Jakarta (UTC+7)"],
+  ["Asia/Makassar", "WITA - Asia/Makassar (UTC+8)"],
+  ["Asia/Jayapura", "WIT - Asia/Jayapura (UTC+9)"],
+  ["UTC", "UTC"],
+];
+let scheduleDraft = null; // what the form shows; null until loaded
+let scheduleDirty = false;
+
+function draftFromSchedule(data) {
+  const days = {};
+  DAY_KEYS.forEach((d) => (days[d] = { on: false, start: "09:00", end: "21:00" }));
+  let always = true;
+  (data.windows || []).forEach((w) => {
+    (w.days || []).forEach((d) => {
+      if (!days[d]) return;
+      days[d] = { on: true, start: w.start, end: w.end === "24:00" ? "00:00" : w.end };
+      if (!(w.start === "00:00" && w.end === "24:00")) always = false;
+    });
+  });
+  if (data.windows && !DAY_KEYS.every((d) => days[d].on)) always = false;
+  return { tz: data.timezone || "Asia/Jakarta", mode: always ? "always" : "custom", days };
+}
+
+function windowsFromDraft(draft) {
+  if (draft.mode === "always") return [{ days: [...DAY_KEYS], start: "00:00", end: "24:00" }];
+  const groups = new Map();
+  DAY_KEYS.forEach((d) => {
+    const x = draft.days[d];
+    if (!x.on) return;
+    const key = x.start + "|" + x.end;
+    if (!groups.has(key)) groups.set(key, { days: [], start: x.start, end: x.end });
+    groups.get(key).days.push(d);
+  });
+  return [...groups.values()];
+}
+
+function validateDraft(draft) {
+  if (draft.mode === "always") return "";
+  const active = DAY_KEYS.filter((d) => draft.days[d].on);
+  if (!active.length) return "Pilih minimal satu hari tayang.";
+  for (const d of active) {
+    const { start, end } = draft.days[d];
+    if (!start || !end) return `${DAY_NAMES[d]}: isi jam mulai dan selesai.`;
+    if (start === end) return `${DAY_NAMES[d]}: jam mulai dan selesai tidak boleh sama.`;
+  }
+  return "";
+}
+
+function describeDays(days) {
+  const idx = days.map((d) => DAY_KEYS.indexOf(d)).sort((a, b) => a - b);
+  const runs = [];
+  idx.forEach((i) => {
+    const last = runs[runs.length - 1];
+    if (last && i === last[1] + 1) last[1] = i;
+    else runs.push([i, i]);
+  });
+  return runs
+    .map(([a, b]) => {
+      if (a === b) return DAY_SHORT[DAY_KEYS[a]];
+      if (b === a + 1) return `${DAY_SHORT[DAY_KEYS[a]]}, ${DAY_SHORT[DAY_KEYS[b]]}`;
+      return `${DAY_SHORT[DAY_KEYS[a]]}-${DAY_SHORT[DAY_KEYS[b]]}`;
+    })
+    .join(", ");
+}
+
+function describeSchedule(draft) {
+  if (draft.mode === "always") return "Layar menayangkan video 24 jam, setiap hari.";
+  const parts = windowsFromDraft(draft).map((w) => {
+    const end = w.end === "00:00" ? "24:00" : w.end;
+    const overnight = w.end !== "00:00" && w.end < w.start ? " (selesai besok)" : "";
+    return `${describeDays(w.days)} ${w.start}-${end}${overnight}`;
+  });
+  const off = DAY_KEYS.filter((d) => !draft.days[d].on);
+  return `Menyala ${parts.join("; ")}.` + (off.length ? ` Mati pada ${describeDays(off)}.` : "");
+}
+
+function renderScheduleEditor() {
+  const draft = scheduleDraft;
+  if (!draft) return;
+  const tz = document.getElementById("sch-tz");
+  const choices = TZ_CHOICES.some(([v]) => v === draft.tz) ? TZ_CHOICES : [...TZ_CHOICES, [draft.tz, draft.tz]];
+  tz.innerHTML = choices.map(([v, label]) => `<option value="${escapeHtml(v)}">${escapeHtml(label)}</option>`).join("");
+  tz.value = draft.tz;
+  document.querySelectorAll('input[name="sch-mode"]').forEach((r) => (r.checked = r.value === draft.mode));
+  document.getElementById("sch-custom").classList.toggle("hidden", draft.mode !== "custom");
+
+  const tbody = document.getElementById("sch-days-body");
+  const active = document.activeElement;
+  const focusKey = active && active.dataset && active.dataset.day ? `${active.dataset.day}|${active.dataset.field}` : null;
+  tbody.innerHTML = DAY_KEYS.map((d) => {
+    const x = draft.days[d];
+    let note = "mati";
+    if (x.on) {
+      note = !x.start || !x.end ? "" : x.end === "00:00" ? "sampai tengah malam" : x.end < x.start ? `selesai besok ${escapeHtml(x.end)}` : "";
+    }
+    return `<tr class="${x.on ? "" : "schedule-day-off"}">
+      <td><strong>${DAY_NAMES[d]}</strong></td>
+      <td><input type="checkbox" data-day="${d}" data-field="on" ${x.on ? "checked" : ""} aria-label="Tayang pada hari ${DAY_NAMES[d]}"></td>
+      <td><input type="time" class="form-input" data-day="${d}" data-field="start" value="${escapeHtml(x.start)}" ${x.on ? "" : "disabled"}></td>
+      <td><input type="time" class="form-input" data-day="${d}" data-field="end" value="${escapeHtml(x.end)}" ${x.on ? "" : "disabled"}></td>
+      <td class="schedule-note">${note}</td></tr>`;
+  }).join("");
+  if (focusKey) {
+    const [d, f] = focusKey.split("|");
+    const again = tbody.querySelector(`[data-day="${d}"][data-field="${f}"]`);
+    if (again) again.focus();
+  }
+
+  const problem = validateDraft(draft);
+  const error = document.getElementById("sch-error");
+  error.textContent = problem;
+  error.classList.toggle("hidden", !problem);
+  document.getElementById("sch-summary").textContent = problem ? "" : describeSchedule(draft);
+  document.getElementById("sch-save").disabled = !!problem || !scheduleDirty;
+  document.getElementById("sch-revert").classList.toggle("hidden", !scheduleDirty);
+}
+
+function setupScheduleEditor() {
+  const root = document.getElementById("tab-schedule");
+  if (!root || root.dataset.ready) return;
+  root.dataset.ready = "1";
+  const touch = () => {
+    scheduleDirty = true;
+    renderScheduleEditor();
+  };
+  const base = () => {
+    const mon = scheduleDraft.days.Mon;
+    return mon.on && mon.start !== mon.end ? mon : { on: true, start: "09:00", end: "21:00" };
+  };
+  document.getElementById("sch-tz").addEventListener("change", (e) => {
+    scheduleDraft.tz = e.target.value;
+    touch();
+  });
+  document.querySelectorAll('input[name="sch-mode"]').forEach((r) =>
+    r.addEventListener("change", (e) => {
+      scheduleDraft.mode = e.target.value;
+      if (scheduleDraft.mode === "custom") {
+        // Coming from "always" every day reads 00:00-00:00, which is not a usable window: start from 09:00-21:00.
+        const unusable = DAY_KEYS.every((d) => !scheduleDraft.days[d].on || scheduleDraft.days[d].start === scheduleDraft.days[d].end);
+        if (unusable) DAY_KEYS.forEach((d) => (scheduleDraft.days[d] = { on: true, start: "09:00", end: "21:00" }));
+      }
+      touch();
+    }),
+  );
+  document.getElementById("sch-days-body").addEventListener("change", (e) => {
+    const { day, field } = e.target.dataset;
+    if (!day) return;
+    scheduleDraft.days[day][field] = field === "on" ? e.target.checked : e.target.value;
+    touch();
+  });
+  document.getElementById("sch-copy-mon").addEventListener("click", () => {
+    const b = base();
+    DAY_KEYS.forEach((d) => (scheduleDraft.days[d] = { ...b, on: true }));
+    touch();
+  });
+  document.getElementById("sch-weekdays").addEventListener("click", () => {
+    const b = base();
+    DAY_KEYS.forEach((d, i) => (scheduleDraft.days[d] = { ...b, on: i < 5 }));
+    touch();
+  });
+  document.getElementById("sch-save").addEventListener("click", saveWindowSchedule);
+  document.getElementById("sch-revert").addEventListener("click", () => {
+    scheduleDraft = draftFromSchedule(schedulesData);
+    scheduleDirty = false;
+    renderScheduleEditor();
+  });
+  setInterval(() => {
+    if (root.classList.contains("active")) refreshScheduleStatus();
+  }, 30000);
+  document.querySelectorAll('[data-tab="schedule"]').forEach((b) => b.addEventListener("click", refreshScheduleStatus));
+}
+
+async function refreshScheduleStatus() {
+  const box = document.getElementById("schedule-status");
+  if (!box) return;
+  const text = document.getElementById("schedule-status-text");
+  try {
+    const res = await fetch(getApiUrl("/api/schedule/status"));
+    if (!res.ok) throw new Error(res.status);
+    const s = await res.json();
+    const badge = document.getElementById("schedule-status-badge");
+    box.className = "schedule-status " + (s.on ? "schedule-status-on" : "schedule-status-off");
+    badge.textContent = s.on ? "MENYALA" : "MATI";
+    badge.className = "badge " + (s.on ? "badge-success" : "badge-error");
+    let when = "";
+    if (s.next_change) {
+      const target = s.next_change.date === (s.now || "").slice(0, 10) ? "hari ini" : DAY_NAMES[s.next_change.day];
+      when = s.on ? `Mati ${target} jam ${s.next_change.time}.` : `Menyala ${target} jam ${s.next_change.time}.`;
+    } else if (s.on) {
+      when = "Tidak ada jadwal mati.";
+    }
+    const clock = s.now ? s.now.slice(11) : "--:--";
+    text.textContent = `Sekarang ${s.on ? "menyala" : "mati"} (${clock} ${s.timezone || ""}). ${when}`;
+    const clockEl = document.getElementById("sch-tz-clock");
+    if (clockEl) clockEl.textContent = clock;
+  } catch (e) {
+    text.textContent = "Status jadwal belum bisa dibaca.";
+  }
+}
+
 function updateScheduleUI() {
+  setupScheduleEditor();
+  if (!scheduleDirty) scheduleDraft = draftFromSchedule(schedulesData);
+  renderScheduleEditor();
+  refreshScheduleStatus();
+
   const tbody = document.getElementById("schedule-table-body");
   if (!tbody) return;
   tbody.innerHTML = "";
-
-  if (!schedulesData.events || schedulesData.events.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color: var(--text-muted);">Belum ada jadwal operasional.</td></tr>`;
+  const events = (schedulesData.events || []).filter((ev) => ev.type === "playlist");
+  if (events.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color: var(--text-muted);">Belum ada pergantian playlist.</td></tr>`;
     return;
   }
-
-  schedulesData.events.forEach((ev) => {
+  events.forEach((ev) => {
     const tr = document.createElement("tr");
-    const days = ev.days.join(", ");
-    const actionStr =
-      ev.type === "power"
-        ? `Power ${ev.action.toUpperCase()}`
-        : `Load Playlist`;
-    const targetStr =
-      ev.type === "power"
-        ? "All System"
-        : `Screen ${ev.screen} (${ev.playlist_name})`;
     const statusClass = ev.enabled ? "badge-success" : "badge-error";
-    const statusText = ev.enabled ? "Active" : "Disabled";
-
     tr.innerHTML = `
             <td><strong>${escapeHtml(ev.time)}</strong></td>
-            <td style="font-size: 11px;">${escapeHtml(days)}</td>
-            <td><span class="badge" style="background: rgba(255,255,255,0.1); border: 1px solid var(--border-color);">${escapeHtml(actionStr)}</span></td>
-            <td>${escapeHtml(targetStr)}</td>
-            <td><span class="badge ${statusClass}" style="cursor:pointer;" data-action="toggle-schedule" data-id="${escapeHtml(ev.id)}">${statusText}</span></td>
+            <td style="font-size: 11px;">${escapeHtml((ev.days || []).map((d) => DAY_SHORT[d] || d).join(", "))}</td>
+            <td>Layar ${escapeHtml(ev.screen)}</td>
+            <td>${escapeHtml(ev.playlist_name)}</td>
+            <td><span class="badge ${statusClass}" style="cursor:pointer;" data-action="toggle-schedule" data-id="${escapeHtml(ev.id)}">${ev.enabled ? "Aktif" : "Nonaktif"}</span></td>
             <td><button class="btn btn-sm btn-danger" data-action="delete-schedule" data-id="${escapeHtml(ev.id)}">Hapus</button></td>
         `;
     tbody.appendChild(tr);
   });
 }
 
-window.saveTimezone = async function () {
-  schedulesData.timezone_offset = parseInt(
-    document.getElementById("tz-select").value,
-  );
-  await saveSchedulesData();
-  showToast("Timezone berhasil disimpan");
-};
+async function saveWindowSchedule() {
+  if (validateDraft(scheduleDraft)) return;
+  const next = { ...schedulesData, timezone: scheduleDraft.tz, windows: windowsFromDraft(scheduleDraft) };
+  delete next.timezone_offset;
+  try {
+    const res = await fetch(getApiUrl("/api/schedule/save"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(next),
+    });
+    if (!res.ok) {
+      let detail = "";
+      try {
+        detail = (await res.json()).error || "";
+      } catch (e) {}
+      showToast("Gagal menyimpan jadwal" + (detail ? ": " + detail : ""), true);
+      return;
+    }
+    schedulesData = next;
+    scheduleDirty = false;
+    showToast("Jadwal tayang disimpan");
+    updateScheduleUI();
+  } catch (e) {
+    showToast("Error menghubungi server", true);
+  }
+}
 
 window.openScheduleModal = function () {
   document.getElementById("schedule-modal").classList.remove("hidden");
-  toggleScheduleForm();
-  // Refresh modal dropdown just in case
-  updatePlaylistDropdowns();
+  updateSchedulePlaylistOptions();
 };
 
 window.closeScheduleModal = function () {
   document.getElementById("schedule-modal").classList.add("hidden");
 };
 
-window.toggleScheduleForm = function () {
-  const type = document.getElementById("sch-type").value;
-  if (type === "power") {
-    document.getElementById("sch-power-fields").classList.remove("hidden");
-    document.getElementById("sch-playlist-fields").classList.add("hidden");
-  } else {
-    document.getElementById("sch-power-fields").classList.add("hidden");
-    document.getElementById("sch-playlist-fields").classList.remove("hidden");
-  }
-};
-
 window.saveNewSchedule = async function () {
-  const type = document.getElementById("sch-type").value;
   const time = document.getElementById("sch-time").value;
   if (!time) {
     alert("Pilih waktu eksekusi");
     return;
   }
-
-  const dayCheckboxes = document.querySelectorAll("#sch-days input:checked");
-  const days = Array.from(dayCheckboxes).map((cb) => cb.value);
+  const days = Array.from(document.querySelectorAll("#sch-days input:checked")).map((cb) => cb.value);
   if (days.length === 0) {
     alert("Pilih minimal 1 hari pelaksanaan");
     return;
   }
-
-  // Conflict Check
-  const isConflict = schedulesData.events.some(
-    (ev) => ev.time === time && ev.days.some((d) => days.includes(d)),
+  const screen = parseInt(document.getElementById("sch-screen").value);
+  const isConflict = (schedulesData.events || []).some(
+    (ev) => ev.type === "playlist" && ev.screen === screen && ev.time === time && ev.days.some((d) => days.includes(d)),
   );
-  if (isConflict) {
-    if (
-      !confirm(
-        t(
-          "toast_conflict",
-          "Konflik: Jadwal sudah ada di waktu tersebut! Lanjutkan?",
-        ),
-      )
-    )
-      return;
-  }
+  if (isConflict && !confirm("Konflik: sudah ada pergantian playlist di waktu itu. Lanjutkan?")) return;
 
-  const newEvent = {
+  if (!schedulesData.events) schedulesData.events = [];
+  schedulesData.events.push({
     id: "sch-" + Date.now(),
-    type: type,
+    type: "playlist",
     time: time,
     days: days,
     enabled: true,
-  };
-
-  if (type === "power") {
-    newEvent.action = document.getElementById("sch-power-action").value;
-  } else {
-    newEvent.screen = parseInt(document.getElementById("sch-screen").value);
-    newEvent.playlist_name = document.getElementById("sch-playlist-name").value;
-  }
-
-  if (!schedulesData.events) schedulesData.events = [];
-  schedulesData.events.push(newEvent);
-
+    screen: screen,
+    playlist_name: document.getElementById("sch-playlist-name").value,
+  });
   await saveSchedulesData();
   closeScheduleModal();
 };

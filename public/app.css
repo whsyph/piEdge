@@ -1849,3 +1849,47 @@ body.cap-no-transport .playback-controls { display: none !important; }
 body.cap-single #screen2-card,
 body.cap-single #output-mode-card { display: none !important; }
 body.cap-single .screens-row { grid-template-columns: minmax(0, 560px); }
+
+/* --- Jadwal tayang (window schedule) --- */
+.schedule-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  margin-bottom: 16px;
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+  font-size: 15px;
+}
+.schedule-status-on { border-color: rgba(46, 204, 113, 0.6); }
+.schedule-status-off { border-color: rgba(231, 76, 60, 0.6); }
+.schedule-row { display: flex; align-items: flex-end; gap: 24px; flex-wrap: wrap; margin-bottom: 16px; }
+.schedule-row .form-group { min-width: 260px; margin: 0; }
+.schedule-clock { color: var(--text-muted); padding-bottom: 10px; }
+.schedule-modes { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.schedule-mode {
+  flex: 1 1 220px;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 12px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  cursor: pointer;
+}
+.schedule-mode small { display: block; color: var(--text-muted); margin-top: 2px; }
+.schedule-mode:has(input:checked) { border-color: var(--accent, #3498db); }
+.schedule-days td { vertical-align: middle; }
+.schedule-days input[type="time"] { width: 130px; }
+.schedule-day-off strong { color: var(--text-muted); }
+.schedule-note { color: var(--text-muted); font-size: 12px; }
+.schedule-tools { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+.schedule-hint { color: var(--text-muted); font-size: 12px; margin: 0 0 12px; }
+.schedule-summary { font-weight: 600; margin: 12px 0; }
+.schedule-error { color: #e74c3c; margin: 8px 0; }
+.schedule-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.schedule-actions .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+@media (max-width: 600px) {
+  .schedule-days th:nth-child(5), .schedule-days td:nth-child(5) { display: none; }
+  .schedule-days input[type="time"] { width: 100px; }
+}
