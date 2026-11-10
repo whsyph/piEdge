@@ -4,7 +4,7 @@
 // Access token, safe HTML and device capabilities
 // ---------------------------------------------------------------------------
 const nativeFetch = window.fetch.bind(window);
-const TOKEN_STORE = "capibarra_tokens";
+const TOKEN_STORE = "capibarra_tokens"; // per device: signed session (or raw access token)
 const LOCAL_DEVICE_ID = "this-device";
 const authDeniedUntil = {};
 let pendingAuth = null;
@@ -33,7 +33,9 @@ function saveToken(origin, token) {
   }
 }
 
-// Ask the operator for the device's access token (one dialog at a time).
+// Log the operator in (one dialog at a time). Resolves with a session token, or "" when cancelled.
+// The password is exchanged at /api/login; the raw access token stays available as a fallback
+// for devices that have no password yet (and for recovery).
 function askToken(origin) {
   if (pendingAuth && pendingAuth.origin === origin) return pendingAuth.promise;
   const promise = new Promise((resolve) => {
@@ -42,19 +44,95 @@ function askToken(origin) {
     const input = document.getElementById("auth-token-input");
     const submit = document.getElementById("auth-submit");
     const cancel = document.getElementById("auth-cancel");
-    document.getElementById("auth-origin").textContent = origin;
-    input.value = "";
-    modal.classList.remove("hidden");
-    input.focus();
+    const label = document.getElementById("auth-label");
+    const error = document.getElementById("auth-error");
+    const hint = document.getElementById("auth-hint");
+    const switcher = document.getElementById("auth-switch");
+    let tokenMode = false;
+    let countdown = null;
+
+    const setMode = (useToken, note) => {
+      tokenMode = useToken;
+      label.textContent = useToken ? "Token akses:" : "Password:";
+      hint.textContent = useToken
+        ? "Baca token di Pi: cat /home/pi/museum_signage/.cms_token. Setelah masuk, atur password di Konfigurasi."
+        : note || "Masukkan password CMS.";
+      switcher.textContent = useToken ? "Masuk dengan password" : "Masuk dengan token akses";
+      input.value = "";
+      showError("");
+      input.focus();
+    };
+    const showError = (message) => {
+      error.textContent = message;
+      error.classList.toggle("hidden", !message);
+    };
     const finish = (value) => {
+      clearInterval(countdown);
       modal.classList.add("hidden");
-      submit.onclick = cancel.onclick = input.onkeydown = null;
+      submit.onclick = cancel.onclick = input.onkeydown = switcher.onclick = null;
+      submit.disabled = false;
       resolve(value);
     };
-    submit.onclick = () => finish(input.value.trim());
+    const lock = (seconds) => {
+      clearInterval(countdown);
+      submit.disabled = true;
+      let left = seconds;
+      const tick = () => {
+        if (left <= 0) {
+          clearInterval(countdown);
+          submit.disabled = false;
+          showError("");
+          return;
+        }
+        showError(`Terlalu banyak percobaan. Coba lagi dalam ${left} detik.`);
+        left -= 1;
+      };
+      tick();
+      countdown = setInterval(tick, 1000);
+    };
+    const attempt = async () => {
+      const value = input.value.trim();
+      if (!value || submit.disabled) return;
+      if (tokenMode) return finish(value);
+      submit.disabled = true;
+      try {
+        const res = await nativeFetch(origin + "/api/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: input.value }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.token) return finish(data.token);
+        if (res.status === 429) return lock(data.retry_after || 60);
+        if (res.status === 409) {
+          submit.disabled = false;
+          return setMode(true);
+        }
+        showError(res.status === 401 ? "Password salah." : "Gagal masuk. Coba lagi.");
+      } catch (e) {
+        showError("Tidak bisa menghubungi perangkat.");
+      }
+      submit.disabled = false;
+      input.select();
+    };
+
+    document.getElementById("auth-origin").textContent = origin;
+    modal.classList.remove("hidden");
+    setMode(false);
+    nativeFetch(origin + "/api/auth/info")
+      .then((r) => r.json())
+      .then((info) => {
+        if (info && info.password_set === false) {
+          setMode(true);
+          hint.textContent = "Perangkat ini belum punya password. Masuk dengan token akses, lalu atur password di Konfigurasi.";
+        }
+      })
+      .catch(() => {});
+    submit.onclick = attempt;
     cancel.onclick = () => finish("");
+    switcher.onclick = () => setMode(!tokenMode);
     input.onkeydown = (e) => {
-      if (e.key === "Enter") finish(input.value.trim());
+      if (e.key === "Enter") attempt();
       if (e.key === "Escape") finish("");
     };
   });
@@ -172,6 +250,7 @@ function setupDelegatedActions() {
     "delete-file": (d) => deleteVideoFileGlobal(d.filename),
   });
   bind("device-table-body", { "delete-device": (d) => deleteRegisteredDevice(d.id) });
+  setupPasswordCard();
   const composition = document.getElementById("playlist-composition-items");
   if (composition) {
     composition.addEventListener("change", (e) => {
@@ -1485,7 +1564,7 @@ function setupUploadZone() {
     if (!getToken(origin)) {
       const probe = await fetch(getApiUrl("/api/status"));
       if (probe.status === 401) {
-        showToast(t("auth_required", "Perlu token akses"), true);
+        showToast(t("auth_required", "Perlu login"), true);
         return;
       }
     }
@@ -2513,6 +2592,68 @@ async function saveSchedulesData() {
   } catch (e) {
     showToast("Error menghubungi server", true);
   }
+}
+
+// --- Password (Konfigurasi) ---
+async function setupPasswordCard() {
+  const card = document.getElementById("password-card");
+  if (!card || card.dataset.ready) return;
+  card.dataset.ready = "1";
+  const show = (message, isError) => {
+    const box = document.getElementById("pw-message");
+    box.textContent = message;
+    box.classList.toggle("hidden", !message);
+    box.style.color = isError ? "#e74c3c" : "var(--text-main)";
+  };
+  const refreshMode = async () => {
+    try {
+      const res = await nativeFetch(getApiUrl("/api/auth/info"));
+      const info = await res.json();
+      document.getElementById("pw-current-group").classList.toggle("hidden", info.password_set === false);
+      document.getElementById("pw-state").textContent = info.password_set
+        ? "Password sudah diatur."
+        : "Belum ada password. Atur password pertama di bawah.";
+    } catch (e) {
+      /* offline: keep the form as it is */
+    }
+  };
+  document.getElementById("pw-save").addEventListener("click", async () => {
+    const current = document.getElementById("pw-current").value;
+    const next = document.getElementById("pw-new").value;
+    const again = document.getElementById("pw-again").value;
+    if (next.length < 6) return show("Password baru minimal 6 karakter.", true);
+    if (next !== again) return show("Konfirmasi password tidak sama.", true);
+    const button = document.getElementById("pw-save");
+    button.disabled = true;
+    try {
+      const url = getApiUrl("/api/password/change");
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ current, new: next }),
+        noPrompt: true,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.token) {
+        saveToken(new URL(url, window.location.href).origin, data.token);
+        ["pw-current", "pw-new", "pw-again"].forEach((id) => (document.getElementById(id).value = ""));
+        show("Password diganti. Perangkat lain perlu login ulang.", false);
+        showToast("Password diganti");
+        refreshMode();
+      } else if (res.status === 429) {
+        show(`Terlalu banyak percobaan. Coba lagi dalam ${data.retry_after || 60} detik.`, true);
+      } else if (res.status === 403) {
+        show("Password lama salah.", true);
+      } else {
+        show(data.error || "Gagal mengganti password.", true);
+      }
+    } catch (e) {
+      show("Tidak bisa menghubungi perangkat.", true);
+    }
+    button.disabled = false;
+  });
+  document.querySelectorAll('[data-tab="config"]').forEach((b) => b.addEventListener("click", refreshMode));
+  refreshMode();
 }
 
 window.shutdownSystem = async function () {

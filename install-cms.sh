@@ -2,7 +2,8 @@
 # Install (or update) the caPIbarra CMS next to the capibarra-lite player on a Raspberry Pi 5.
 #
 #   Fresh install : bash install-cms.sh --allow 192.168.8.0/24
-#   Update code   : bash install-cms.sh --update        (keeps playlists, schedules, token, media)
+#                   (asks for the CMS login password; or pipe it with --password-stdin)
+#   Update code   : bash install-cms.sh --update        (keeps playlists, schedules, password, media)
 #
 # Run as the normal user `pi` (not root); it uses sudo for the system parts.
 # Prerequisite: the player is already installed (sudo python3 install-fresh.py in the player repo),
@@ -17,10 +18,12 @@ SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 MODE="fresh"
 ALLOW=""
+PASSWORD_STDIN=""
 usage() {
   cat <<'EOF'
 Usage: bash install-cms.sh --allow <IP-or-CIDR>[,<IP-or-CIDR>...]   fresh install
        bash install-cms.sh --update                                   update code only
+  --password-stdin   read the CMS login password from the first line of stdin (non-interactive)
   --allow   who may open the CMS on port 8080 (everyone else is dropped), e.g. 192.168.8.0/24
             or 192.168.8.128,192.168.8.103
 EOF
@@ -28,6 +31,7 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --update) MODE="update"; shift ;;
+    --password-stdin) PASSWORD_STDIN=1; shift ;;
     --allow) ALLOW="${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
@@ -151,6 +155,30 @@ if [[ "$MODE" == "fresh" ]]; then
 fi
 sudo systemctl restart cms-signage.service
 
+if [[ "$MODE" == "fresh" && ! -e "$APP_DIR/.cms_password" ]]; then
+  echo "== CMS login password"
+  PW=""
+  if [[ -n "$PASSWORD_STDIN" ]]; then
+    IFS= read -r PW || true
+  elif [[ -t 0 ]]; then
+    while true; do
+      read -r -s -p "Password baru CMS (min. 6 karakter): " PW; echo
+      read -r -s -p "Ulangi password: " PW2; echo
+      if [[ "$PW" != "$PW2" ]]; then echo "Password tidak sama, ulangi."; continue; fi
+      if [[ ${#PW} -lt 6 ]]; then echo "Minimal 6 karakter, ulangi."; continue; fi
+      break
+    done
+  fi
+  if [[ -n "$PW" ]]; then
+    (cd "$APP_DIR" && printf '%s\n' "$PW" | python3 server.py --set-password --stdin) \
+      || echo "WARNING: password not saved; set it later with: cd $APP_DIR && python3 server.py --set-password"
+  else
+    echo "Tidak ada password diberikan: CMS dapat dimasuki dengan token akses ($APP_DIR/.cms_token) sampai password diatur:"
+    echo "  cd $APP_DIR && python3 server.py --set-password"
+  fi
+  unset PW PW2
+fi
+
 echo "== Checking"
 ok=""
 for _ in $(seq 1 20); do
@@ -167,7 +195,9 @@ cat <<EOF
 
 CMS terpasang.
   Buka      : http://${IP}:8080/
-  Token     : cat $APP_DIR/.cms_token      (tempel di dialog saat UI meminta)
+  Login     : password yang kamu atur tadi (ganti di UI: Konfigurasi > Password)
+  Lupa pw   : cd $APP_DIR && python3 server.py --set-password
+  Cadangan  : token akses di $APP_DIR/.cms_token (hanya untuk skrip dan pemulihan)
   Jadwal    : tab Penjadwalan (default: selalu menyala)
   Update    : cd $SRC && git pull && bash install-cms.sh --update
 EOF

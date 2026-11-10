@@ -1,3 +1,4 @@
+import getpass
 import hmac
 import os
 import re
@@ -15,6 +16,7 @@ import threading
 from datetime import datetime, time as clock_time, timezone, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+import cms_auth
 from media_check import ALLOWED_EXTENSIONS, check_upload, validate_upload_name
 
 # Directory settings
@@ -67,6 +69,8 @@ DEFAULT_CONFIG = {
 }
 CONFIG = dict(DEFAULT_CONFIG)
 TOKEN = ""
+AUTH = cms_auth.AuthStore(APP_DIR)  # operator password + signed sessions (no files touched until used)
+PUBLIC_API = {"/api/login", "/api/auth/info"}  # reachable without credentials
 JSON_LOCK = threading.RLock()  # serialises read-modify-write of the shared JSON files
 # Only these suffixes are served from public/; the *.json data files are API-only.
 STATIC_TYPES = {
@@ -1020,9 +1024,79 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
         if not CONFIG.get("require_auth"):
             return True
         header = self.headers.get("Authorization", "")
-        if not header.startswith("Bearer ") or not TOKEN:
+        if not header.startswith("Bearer "):
             return False
-        return hmac.compare_digest(header[7:].strip().encode("utf-8"), TOKEN.encode("utf-8"))
+        supplied = header[7:].strip()
+        # Either the signed session from /api/login, or the legacy access token (scripts, recovery).
+        if TOKEN and hmac.compare_digest(supplied.encode("utf-8"), TOKEN.encode("utf-8")):
+            return True
+        return AUTH.valid_session(supplied)
+
+    def _client(self):
+        return self.client_address[0]
+
+    def _read_json_body(self, limit=4096):
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except (TypeError, ValueError):
+            length = 0
+        if not 0 < length <= limit:
+            return None
+        try:
+            data = json.loads(self.rfile.read(length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            return None
+        return data if isinstance(data, dict) else None
+
+    def handle_api_auth_info(self):
+        self._send_json(200, {"password_set": AUTH.password_set()})
+
+    def handle_api_login(self):
+        body = self._read_json_body()
+        if body is None:
+            self._json_error(400, "expected a JSON object with a password")
+            return
+        outcome, value = AUTH.check_login(self._client(), body.get("password"))
+        if outcome == "ok":
+            self._send_json(200, {"success": True, "token": value, "expires_in": cms_auth.SESSION_SECONDS})
+        elif outcome == "locked":
+            self._send_locked(value)
+        elif outcome == "unset":
+            self._json_error(409, "password_not_set")
+        else:
+            time.sleep(0.5)  # a wrong guess is never answered instantly
+            self._json_error(401, "wrong password")
+
+    def _send_locked(self, seconds):
+        body = json.dumps({"success": False, "error": "too many attempts", "retry_after": seconds}).encode("utf-8")
+        self.send_response(429)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Retry-After", str(seconds))
+        self.send_cors_headers()
+        self.end_headers()
+        self.wfile.write(body)
+
+    def handle_api_password_change(self):
+        body = self._read_json_body()
+        if body is None or not isinstance(body.get("new"), str):
+            self._json_error(400, "expected {current, new}")
+            return
+        if AUTH.password_set():  # the first password may be set by whoever holds the access token
+            outcome, value = AUTH.check_login(self._client(), body.get("current"))
+            if outcome == "locked":
+                self._send_locked(value)
+                return
+            if outcome != "ok":
+                time.sleep(0.5)
+                self._json_error(403, "current password is wrong")
+                return
+        try:
+            AUTH.set_password(body["new"])
+        except cms_auth.PasswordError as exc:
+            self._json_error(400, str(exc))
+            return
+        self._send_json(200, {"success": True, "token": AUTH.issue_session(), "expires_in": cms_auth.SESSION_SECONDS})
 
     def _gate(self, path, is_post):
         """True when the request may proceed; otherwise the error response was already sent."""
@@ -1030,7 +1104,7 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
         if origin and (is_post or path.startswith("/api/")) and not self._allowed_origin(origin):
             self._json_error(403, "origin not allowed")
             return False
-        if path.startswith("/api/") and not self._is_authorized():
+        if path.startswith("/api/") and path not in PUBLIC_API and not self._is_authorized():
             time.sleep(0.3)  # slow down token guessing
             self._json_error(401, "authentication required")
             return False
@@ -1073,7 +1147,11 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
             return
 
         # --- API Endpoints ---
-        if path == "/api/status":
+        if path == "/api/auth/info":
+            self.handle_api_auth_info()
+            return
+
+        elif path == "/api/status":
             self.handle_api_status()
             return
 
@@ -1202,7 +1280,11 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
         if not self._gate(path, True):
             return
 
-        if path == "/api/control":
+        if path == "/api/login":
+            self.handle_api_login()
+        elif path == "/api/password/change":
+            self.handle_api_password_change()
+        elif path == "/api/control":
             self.handle_api_control()
         elif path == "/api/upload":
             self.handle_api_upload()
@@ -2031,7 +2113,27 @@ def run_server(port=8080):
     httpd.server_close()
 
 
+def set_password_cli(read_stdin):
+    """`server.py --set-password [--stdin]`: set or reset the operator password."""
+    if read_stdin:
+        password = sys.stdin.readline().rstrip("\r\n")
+    else:
+        password = getpass.getpass("Password baru CMS: ")
+        if password != getpass.getpass("Ulangi password: "):
+            print("Password tidak sama.", file=sys.stderr)
+            return 1
+    try:
+        AUTH.set_password(password)
+    except cms_auth.PasswordError as exc:
+        print(f"Password ditolak: {exc}", file=sys.stderr)
+        return 1
+    print("Password CMS disimpan. Semua sesi login lama dikeluarkan.")
+    return 0
+
+
 if __name__ == "__main__":
+    if "--set-password" in sys.argv[1:]:
+        sys.exit(set_password_cli("--stdin" in sys.argv[1:]))
     port = 8080
     if len(sys.argv) > 1:
         port = int(sys.argv[1])

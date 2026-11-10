@@ -9,3 +9,5 @@ Thumbs.db
 *.log
 
 .cms_token
+.cms_password
+.cms_secret

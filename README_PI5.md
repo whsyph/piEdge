@@ -67,13 +67,15 @@ Umumnya LAN adalah `eth0`/`end0`, Wi-Fi adalah `wlan0`. IP yang dipilih untuk CM
 
 Sejak revisi "cms-hardening", CMS tidak lagi terbuka untuk siapa saja di jaringan.
 
-**Token akses.** Saat pertama kali jalan, server membuat token acak di `/home/pi/museum_signage/.cms_token` (mode `0600`). Baca dengan `cat /home/pi/museum_signage/.cms_token`, lalu masukkan di dialog "Token akses diperlukan" saat membuka UI. Token disimpan di browser (per perangkat). Hapus file itu dan restart `cms-signage` untuk membuat token baru. Akses API dari skrip: `curl -H "Authorization: Bearer <token>" http://IP:8080/api/status`.
+**Login.** UI meminta password operator. Server menyimpannya sebagai hash scrypt di `/home/pi/museum_signage/.cms_password` (mode `0600`) dan menukarnya dengan sesi bertanda tangan yang berlaku 7 hari dan tetap sah setelah CMS restart. 5 password salah dari satu alamat mengunci alamat itu 1 menit, lalu makin lama (2, 4, ... sampai 15 menit). Ganti password di UI (**Konfigurasi > Password**; ini mengeluarkan semua sesi lain) atau reset lewat SSH: `cd /home/pi/museum_signage && python3 server.py --set-password`. Perangkat yang belum punya password bisa dimasuki dengan token akses (di bawah) dan password pertama diatur dari Konfigurasi.
+
+**Token akses (cadangan untuk skrip dan pemulihan).** Saat pertama kali jalan server juga membuat token acak di `/home/pi/museum_signage/.cms_token` (mode `0600`). Akses API dari skrip: `curl -H "Authorization: Bearer <token>" http://IP:8080/api/status`. Hapus file itu dan restart `cms-signage` untuk membuat token baru.
 
 **`cms_config.json`** (opsional, di samping `server.py`; semua kunci boleh dihilangkan):
 
 | Kunci | Bawaan | Arti |
 |---|---|---|
-| `require_auth` | `true` | Wajib token di semua `/api/*` |
+| `require_auth` | `true` | Wajib login (sesi atau token) di semua `/api/*`, kecuali `/api/login` dan `/api/auth/info` |
 | `allowed_origins` | `[]` | Origin dashboard lain yang boleh memanggil API ini lewat browser, mis. `["http://192.168.8.10:8080"]`. Origin halaman sendiri selalu diizinkan |
 | `legacy_players` | `false` | `true` hanya untuk pemutar lama layar1/layar2 (playlist.txt, `loadlist`, stop `layar*.service`). Pemutar Pi 5 membaca `playlists.json` sendiri, jadi biarkan `false` |
 | `max_upload_mb` | `8192` | Ukuran upload maksimum |
@@ -86,7 +88,7 @@ Sejak revisi "cms-hardening", CMS tidak lagi terbuka untuk siapa saja di jaringa
 ffmpeg -i input.mp4 -c:v libx265 -preset medium -crf 20 -tag:v hvc1 -an output.mp4
 ```
 
-**Berkas data** (`playlists.json`, `schedules.json`, `network_config.json`, `audio_config.json`, ...) tidak lagi disajikan lewat HTTP; hanya lewat API (dengan token). Semuanya ditulis secara atomik, jadi pemutar tidak pernah membaca berkas separuh jadi.
+**Berkas data** (`playlists.json`, `schedules.json`, `network_config.json`, `audio_config.json`, ...) tidak lagi disajikan lewat HTTP; hanya lewat API (setelah login). Semuanya ditulis secara atomik, jadi pemutar tidak pernah membaca berkas separuh jadi.
 
 **Hak sudo.** CMS memakai `sudo -n` untuk `systemctl start/stop/restart pi5-signage`, `ip link set`, dan `shutdown`. Pi OS memberi user `pi` sudo tanpa password penuh; untuk membatasinya, salin `cms-signage.sudoers` ke `/etc/sudoers.d/` (periksa dengan `sudo visudo -cf` dulu) dan hapus `/etc/sudoers.d/010_pi-nopasswd` hanya jika kamu yakin tidak membutuhkan sudo penuh.
 
@@ -105,9 +107,9 @@ bash install-cms.sh --allow 192.168.8.0/24
 
 `--allow` menentukan siapa yang boleh membuka port 8080 (IP atau CIDR, pisahkan dengan koma). Selain itu port di-drop. Skrip menolak jalan jika CMS sudah ada.
 
-Skrip menyalin CMS ke `/home/pi/museum_signage`, mengarahkan `/etc/pi5-signage.json` ke file CMS (backup dibuat), memasang service `cms-signage` dan `capibarra-firewall`, lalu mengecek bahwa CMS menjawab dan `/api/status` menolak permintaan tanpa token. Token dibuat otomatis di `/home/pi/museum_signage/.cms_token`.
+Skrip menyalin CMS ke `/home/pi/museum_signage`, mengarahkan `/etc/pi5-signage.json` ke file CMS (backup dibuat), memasang service `cms-signage` dan `capibarra-firewall`, lalu mengecek bahwa CMS menjawab dan `/api/status` menolak permintaan tanpa login. Installer menanyakan password login CMS sekali (atau `--password-stdin` untuk non-interaktif); token cadangan dibuat otomatis di `/home/pi/museum_signage/.cms_token`.
 
-Update kode kemudian, tanpa menyentuh playlist, jadwal, token, atau media:
+Update kode kemudian, tanpa menyentuh playlist, jadwal, password, atau media:
 
 ```bash
 cd ~/capibarra-cms && git pull && bash install-cms.sh --update

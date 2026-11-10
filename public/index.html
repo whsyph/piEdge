@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>caPIbarra CMS</title>
     <link rel="icon" type="image/png" href="logo.png">
-    <link rel="stylesheet" href="app.css?v=schedule-windows-2">
+    <link rel="stylesheet" href="app.css?v=password-login-1">
 </head>
 
 <body>
@@ -515,6 +515,26 @@
                             </div>
                             <button id="btn-save-network" class="btn btn-primary margin-top-md" style="width: 100%;" onclick="saveNetworkConfig()" data-i18n="btn_save_network">💾 Terapkan Jaringan</button>
                         </div>
+
+                        <div id="password-card" class="config-card" style="margin: 0; flex: 1; min-width: 300px; max-width: 500px;">
+                            <h3 style="margin-bottom: 20px; font-size: 16px; font-weight: 600; border-bottom: 1px solid var(--border-color); padding-bottom: 12px;">🔒 Password</h3>
+                            <p id="pw-state" class="help-text">Memuat...</p>
+                            <div class="form-group" id="pw-current-group">
+                                <label for="pw-current">Password lama:</label>
+                                <input type="password" id="pw-current" class="form-input" autocomplete="current-password">
+                            </div>
+                            <div class="form-group margin-top-sm">
+                                <label for="pw-new">Password baru (min. 6 karakter):</label>
+                                <input type="password" id="pw-new" class="form-input" autocomplete="new-password">
+                            </div>
+                            <div class="form-group margin-top-sm">
+                                <label for="pw-again">Ulangi password baru:</label>
+                                <input type="password" id="pw-again" class="form-input" autocomplete="new-password">
+                            </div>
+                            <p id="pw-message" class="help-text hidden" role="status"></p>
+                            <button id="pw-save" class="btn btn-primary margin-top-md" style="width: 100%;" type="button">Simpan password</button>
+                            <p class="help-text margin-top-sm">Mengganti password mengeluarkan semua perangkat lain dari sesi login.</p>
+                        </div>
                     </div>
                 </div>
 
@@ -647,17 +667,19 @@
         </main>
     </div>
 
-    <!-- Access token dialog -->
+    <!-- Login dialog -->
     <div id="auth-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="auth-title">
         <div class="modal-content">
-            <h3 id="auth-title">Token akses diperlukan</h3>
-            <p class="help-text">Perangkat <code id="auth-origin"></code> meminta token. Baca di Pi dengan:
-                <code>cat /home/pi/museum_signage/.cms_token</code></p>
+            <h3 id="auth-title">Masuk ke CMS</h3>
+            <p class="help-text">Perangkat <code id="auth-origin"></code> meminta login.</p>
             <div class="form-group margin-top-sm">
-                <label for="auth-token-input">Token:</label>
-                <input type="password" id="auth-token-input" class="form-input" autocomplete="off" spellcheck="false">
+                <label for="auth-token-input" id="auth-label">Password:</label>
+                <input type="password" id="auth-token-input" class="form-input" autocomplete="current-password" spellcheck="false">
             </div>
+            <p id="auth-hint" class="help-text"></p>
+            <p id="auth-error" class="schedule-error hidden" role="alert"></p>
             <div class="modal-actions margin-top-md">
+                <button id="auth-switch" class="btn btn-sm btn-secondary" type="button" style="margin-right: auto;">Masuk dengan token akses</button>
                 <button id="auth-cancel" class="btn btn-secondary" type="button">Batal</button>
                 <button id="auth-submit" class="btn btn-primary" type="button">Masuk</button>
             </div>
@@ -709,7 +731,7 @@
         </div>
     </div>
 
-    <script src="app.js?v=schedule-windows-2"></script>
+    <script src="app.js?v=password-login-1"></script>
     <script src="operation-ui.js?v=2"></script>
 </body>
 
