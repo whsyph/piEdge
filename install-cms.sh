@@ -191,11 +191,16 @@ code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/api/status)
 sudo systemctl try-restart pi5-signage.service 2>/dev/null || true   # only if the player is already running; never start a disabled one
 
 IP="$(hostname -I | awk '{print $1}')"
+if [[ -e "$APP_DIR/.cms_password" ]]; then
+  LOGIN_LINE="password CMS (ganti di UI: Konfigurasi > Password)"
+else
+  LOGIN_LINE="BELUM ADA PASSWORD. Atur dengan: ssh -t pi@${IP} \"cd $APP_DIR && python3 server.py --set-password\""
+fi
 cat <<EOF
 
 CMS terpasang.
   Buka      : http://${IP}:8080/
-  Login     : password yang kamu atur tadi (ganti di UI: Konfigurasi > Password)
+  Login     : ${LOGIN_LINE}
   Lupa pw   : cd $APP_DIR && python3 server.py --set-password
   Cadangan  : token akses di $APP_DIR/.cms_token (hanya untuk skrip dan pemulihan)
   Jadwal    : tab Penjadwalan (default: selalu menyala)
