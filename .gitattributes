@@ -1,0 +1,11 @@
+# Linux-run files: keep LF in the repo, in archives, and in checkouts on any OS.
+* text=auto
+*.sh text eol=lf
+*.py text eol=lf
+*.service text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.js text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.lua text eol=lf
