@@ -6,7 +6,7 @@
   ],
   "mpv": {
     "vo": "dmabuf-wayland",
-    "hwdec": "auto-safe",
+    "hwdec": "drm",
     "hwdec_codecs": "hevc,h264,vp9,av1",
     "hwdec_extra_frames": 16,
     "video_sync": "audio",
@@ -19,9 +19,9 @@
     "max_hwdec_streams_4k": 1
   },
   "validation": {
-    "status": "baseline_unverified",
-    "tested_device": null,
-    "verified_codecs": [],
-    "notes": "Renderer matches origin/capibarra-lite 135cc67; this packaging revision still requires board acceptance."
+    "status": "single_clip_verified",
+    "tested_device": "Raspberry Pi 5 Model B Rev 1.1 (pi-3), Raspberry Pi OS Bookworm arm64, mpv 0.35.1, FHD HDMI-A-1 panel",
+    "verified_codecs": ["hevc 1920x1080 24fps 8-bit"],
+    "notes": "Fresh install, unattended boot and looping verified on pi-3 with hwdec=drm (auto-safe does not select the drm hwdec in Debian mpv 0.35.1 and fails at hwupload). H.264 has no Pi 5 hardware decoder and is not renderable by dmabuf-wayland. Not yet verified: 4K60, audio, 12 h soak test."
   }
 }

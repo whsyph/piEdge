@@ -89,6 +89,10 @@ class FreshInstallTests(unittest.TestCase):
             finally:
                 fresh.pi_user, fresh.run = saved_user, saved_run
 
+    def test_lf_helper_strips_crlf_from_payload(self):
+        self.assertEqual(fresh.lf(b'#!/bin/bash\r\nset -e\r\n'), b'#!/bin/bash\nset -e\n')
+        self.assertEqual(fresh.lf(b'already\nlf\n'), b'already\nlf\n')
+
     def test_units_have_fresh_boot_runtime_contract(self):
         player = (ROOT / 'pi5-signage.service').read_text()
         compositor = (ROOT / 'labwc.service').read_text()
@@ -119,7 +123,11 @@ class FreshInstallTests(unittest.TestCase):
                 self.assertTrue((root / 'var/lib/pi5-signage/videos').is_dir())
                 self.assertTrue((root / 'etc/pi5-signage.json').exists())
                 self.assertTrue((root / 'etc/systemd/system/pi5-signage.service').exists())
-                self.assertTrue((root / 'etc/systemd/system/seatd.service.d/capibarra.conf').exists())
+                dropin = (root / 'etc/systemd/system/seatd.service.d/capibarra.conf').read_text()
+                self.assertIn('ExecStart=seatd -g video', dropin)
+                self.assertNotIn('/usr/bin/seatd', dropin)  # Debian ships /usr/sbin/seatd
+                for name in ('signage.py', 'splash.py', 'splash.sh'):
+                    self.assertNotIn(b'\r', (root / 'opt/pi5-signage' / name).read_bytes())
                 # Verify neither systemctl start nor enable was called!
                 flat_cmds = [' '.join(str(x) for x in c) for c in commands]
                 for c in flat_cmds:

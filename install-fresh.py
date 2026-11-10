@@ -87,6 +87,14 @@ def check(source=ROOT, root=Path('/')):
     return user, config
 
 
+SEATD_DROPIN = b'[Service]\nExecStart=\nExecStart=seatd -g video\n'
+
+
+def lf(data):
+    """Payload must be LF: a CRLF shebang ('bash\\r') makes the kernel fail with 'No such file'."""
+    return data.replace(b'\r\n', b'\n')
+
+
 def exclusive(path, data, mode=0o644):
     with path.open('xb') as stream:
         stream.write(data)
@@ -109,7 +117,7 @@ def install(source=ROOT, root=Path('/')):
     os.chown(media.parent, user.pw_uid, user.pw_gid)
     os.chown(media, user.pw_uid, user.pw_gid)
     for name in PAYLOAD:
-        exclusive(app / name, (source / name).read_bytes(), 0o755 if name.endswith('.sh') else 0o644)
+        exclusive(app / name, lf((source / name).read_bytes()), 0o755 if name.endswith('.sh') else 0o644)
     run(['/usr/bin/python3', str(app / 'splash.py'), '--output', str(app / 'splash.ppm')])
     config.update(media_dir='/var/lib/pi5-signage/videos')
     for key in ('playlist_file', 'schedules_file'):
@@ -128,7 +136,8 @@ def install(source=ROOT, root=Path('/')):
     if override.exists():
         raise ValueError(f'Existing service drop-in: {override}')
     override.mkdir(mode=0o755, exist_ok=False)
-    exclusive(override / 'capibarra.conf', b'[Service]\nExecStart=\nExecStart=/usr/bin/seatd -g video\n')
+    # Bare name like the packaged unit: Debian ships seatd in /usr/sbin, so an absolute /usr/bin path fails with 203/EXEC.
+    exclusive(override / 'capibarra.conf', SEATD_DROPIN)
     run(['systemctl', 'daemon-reload'])
     # Deliberately neither enable nor start: reboot must not begin playback either.
     print('Installed, disabled and not started. Review /etc/pi5-signage.json and add media before manually starting pi5-signage.service.')
