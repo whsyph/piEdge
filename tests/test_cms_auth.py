@@ -217,5 +217,24 @@ class LoginHttpTests(unittest.TestCase):
             self.assertFalse(fresh.password_set())
 
 
+class InstallerCoverageTests(unittest.TestCase):
+    def test_install_script_copies_every_local_module_the_server_imports(self):
+        import ast
+        source = (ROOT / "server.py").read_text(encoding="utf-8")
+        local = {f.stem for f in ROOT.glob("*.py")} - {"server"}
+        imported = set()
+        for node in ast.walk(ast.parse(source)):
+            if isinstance(node, ast.Import):
+                imported |= {a.name.split(".")[0] for a in node.names}
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported.add(node.module.split(".")[0])
+        needed = sorted(imported & local)
+        self.assertIn("cms_auth", needed)
+        script = (ROOT / "install-cms.sh").read_text(encoding="utf-8")
+        for module in needed:
+            self.assertEqual(script.count(f"{module}.py"), 2,
+                             f"install-cms.sh must check for and copy {module}.py")
+
+
 if __name__ == "__main__":
     unittest.main()

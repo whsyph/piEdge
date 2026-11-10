@@ -42,7 +42,7 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 
 [[ "$(id -u)" -ne 0 ]] || die "run as the normal user pi, not root (the script calls sudo itself)"
 [[ "$(id -un)" == "pi" ]] || die "this layout expects the user 'pi' (found $(id -un))"
-for f in server.py media_check.py cms-signage.service public/index.html public/app.js; do
+for f in server.py cms_auth.py media_check.py cms-signage.service public/index.html public/app.js; do
   [[ -e "$SRC/$f" ]] || die "missing $f; run this from the CMS repository (branch claude/cms-hardening)"
 done
 command -v python3 >/dev/null || die "python3 not found"
@@ -68,7 +68,7 @@ install -d -m 0755 "$VIDEO_ROOT" "$VIDEO_ROOT/media" "$VIDEO_ROOT/layar1" "$VIDE
 if [[ "$MODE" == "update" ]]; then
   cp -a "$APP_DIR" "$HOME/museum_signage_backup_$(date +%Y%m%d-%H%M%S)"
 fi
-install -m 0644 "$SRC/server.py" "$SRC/media_check.py" "$APP_DIR/"
+install -m 0644 "$SRC/server.py" "$SRC/cms_auth.py" "$SRC/media_check.py" "$APP_DIR/"
 for f in app.js app.css index.html operation-ui.js logo.png placeholder.jpg; do
   if [[ -e "$SRC/public/$f" ]]; then
     install -m 0644 "$SRC/public/$f" "$APP_DIR/public/$f"
