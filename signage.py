@@ -461,8 +461,52 @@ def wait_or_stop(seconds, config):
         time.sleep(min(1, max(0, deadline - time.monotonic())))
 
 
+HDMI_HELPER = Path("/usr/local/sbin/capibarra-hdmi")
+CONNECTOR_WAKE_SECONDS = 8  # how long to wait for the compositor to re-add a restored output
+
+
+def force_connector(mode: str, display: str) -> bool:
+    """Cut ('off') or restore ('detect') the HDMI signal itself through the root helper.
+
+    `wlr-randr --off` alone is not enough on monitors that drop their hot-plug line when the
+    signal goes away (pi-2): the connector bounces and the compositor switches the output
+    straight back on, showing an empty desktop. Forcing the connector off removes the
+    output for good, so the monitor can sleep. Returns False when the helper is not installed.
+    """
+    if not HDMI_HELPER.exists():
+        return False
+    try:
+        result = subprocess.run(["sudo", "-n", str(HDMI_HELPER), mode, display],
+                                timeout=5, capture_output=True, text=True)
+    except (OSError, subprocess.TimeoutExpired):
+        LOG.warning("HDMI helper unavailable (%s %s)", mode, display)
+        return False
+    if result.returncode:
+        LOG.warning("HDMI helper failed (%s %s): %s", mode, display, result.stderr.strip())
+    return result.returncode == 0
+
+
 def set_output(enabled: bool, display: str, quiet: bool = False):
-    """Toggle Wayland output via wlr-randr; best-effort, never crash signage."""
+    """Switch the HDMI output on or off; best-effort, never crash signage."""
+    if enabled:
+        if not display_ready({"display": display}) and force_connector("detect", display):
+            # The connector was forced off: the compositor re-adds the output by itself.
+            deadline = time.monotonic() + CONNECTOR_WAKE_SECONDS
+            while time.monotonic() < deadline:
+                if _wlr_output(True, display, quiet=True):
+                    return True
+                time.sleep(1)
+        return _wlr_output(True, display, quiet)
+    if HDMI_HELPER.exists() and not display_ready({"display": display}):
+        return True if force_connector("off", display) else _wlr_output(False, display, quiet)  # already dark
+    ok = _wlr_output(False, display, quiet)
+    if ok:
+        force_connector("off", display)
+    return ok
+
+
+def _wlr_output(enabled: bool, display: str, quiet: bool = False):
+    """Toggle one Wayland output via wlr-randr."""
     try:
         cmd=["wlr-randr","--output",display,"--on" if enabled else "--off"]
         env=dict(os.environ)

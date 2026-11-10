@@ -30,6 +30,9 @@ install -d -m 755 /opt/pi5-signage/profiles /var/lib/pi5-signage/videos
 for file in signage.py splash.py splash.sh; do install -m 755 "$src_dir/$file" "/opt/pi5-signage/$file"; done
 install -m 644 "$src_dir/profiles/$release_target.json" "/opt/pi5-signage/profiles/$release_target.json"
 python3 /opt/pi5-signage/splash.py --output /opt/pi5-signage/splash.ppm
+install -m 755 "$src_dir/scripts/capibarra-hdmi" /usr/local/sbin/capibarra-hdmi
+install -m 440 "$src_dir/scripts/capibarra-hdmi.sudoers" /etc/sudoers.d/capibarra-hdmi
+visudo -cf /etc/sudoers.d/capibarra-hdmi >/dev/null || { rm -f /etc/sudoers.d/capibarra-hdmi; echo "sudoers capibarra-hdmi tidak valid, dihapus" >&2; exit 1; }
 if [ ! -e /etc/pi5-signage.json ]; then install -m 644 "$src_dir/config.$release_target.json" /etc/pi5-signage.json; fi
 # Tidak menimpa unit compositor milik operator.
 if [ ! -e /etc/systemd/system/labwc.service ]; then install -m 644 "$src_dir/labwc.service" /etc/systemd/system/labwc.service; fi

@@ -16,6 +16,8 @@ ExecStartPre=/bin/sh -c 'i=0; while [ ! -S "$$XDG_RUNTIME_DIR/$$WAYLAND_DISPLAY"
 ExecStartPre=/opt/pi5-signage/splash.sh
 ExecStartPre=/bin/sleep 1
 ExecStart=/usr/bin/python3 /opt/pi5-signage/signage.py --config /etc/pi5-signage.json
+# If the player stops while the schedule had the HDMI signal cut, give the screen its signal back.
+ExecStopPost=-/usr/bin/sudo -n /usr/local/sbin/capibarra-hdmi detect all
 Restart=always
 RestartSec=5
 StandardInput=tty-force

@@ -4,7 +4,7 @@ import argparse, hashlib, json, subprocess, tarfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-INCLUDE = ['signage.py','splash.py','splash.sh','install.sh','labwc.service','pi5-signage.service','scripts/preflight.py']
+INCLUDE = ['signage.py','splash.py','splash.sh','install.sh','labwc.service','pi5-signage.service','scripts/preflight.py','scripts/capibarra-hdmi','scripts/capibarra-hdmi.sudoers']
 def sha(path): return hashlib.sha256(path.read_bytes()).hexdigest()
 def main():
  p=argparse.ArgumentParser(); p.add_argument('target', choices=['pi5']); p.add_argument('--version', default='0.2.0-rc1'); p.add_argument('--dist', type=Path, default=ROOT/'dist'); a=p.parse_args()

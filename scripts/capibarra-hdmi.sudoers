@@ -1,0 +1,2 @@
+# Lets the signage player (user pi) cut or restore the HDMI signal; nothing else.
+pi ALL=(root) NOPASSWD: /usr/local/sbin/capibarra-hdmi off HDMI-A-1, /usr/local/sbin/capibarra-hdmi off HDMI-A-2, /usr/local/sbin/capibarra-hdmi detect HDMI-A-1, /usr/local/sbin/capibarra-hdmi detect HDMI-A-2, /usr/local/sbin/capibarra-hdmi detect all

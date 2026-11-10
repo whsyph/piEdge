@@ -1,4 +1,5 @@
 import json
+import sys
 import tempfile
 import unittest
 import unittest.mock
@@ -461,6 +462,67 @@ class SignageTests(unittest.TestCase):
             unittest.mock.patch.stopall()
         self.assertEqual(woke, [(True, True)])               # one quiet "--on" attempt, throttled to every 10 s
         self.assertEqual(sum("no display attached" in line for line in logs.output), 1)
+
+    def _output_calls(self, enabled, connector_status, helper=True, wlr_ok=True, wlr_fail_first=0):
+        """Run set_output with fake wlr-randr / helper; returns the commands issued, in order."""
+        import signage
+        calls = []
+        failures = {"left": wlr_fail_first}
+
+        def fake_run(cmd, **kw):
+            calls.append(cmd[0] if cmd[0] == "wlr-randr" else " ".join(cmd[3:]))
+            if cmd[0] == "wlr-randr" and (not wlr_ok or failures["left"] > 0):
+                failures["left"] -= 1
+                return unittest.mock.Mock(returncode=1, stderr="no such output")
+            return unittest.mock.Mock(returncode=0, stderr="")
+
+        with tempfile.TemporaryDirectory() as temp:
+            drm = Path(temp) / "drm"
+            (drm / "card1-HDMI-A-1").mkdir(parents=True)
+            (drm / "card1-HDMI-A-1" / "status").write_text(connector_status + "\n")
+            tool = Path(temp) / "capibarra-hdmi"
+            if helper:
+                tool.write_text("#!/bin/sh\n")
+            with unittest.mock.patch.object(signage, "DRM_CLASS_DIR", drm), \
+                 unittest.mock.patch.object(signage, "HDMI_HELPER", tool), \
+                 unittest.mock.patch.object(signage.subprocess, "run", fake_run), \
+                 unittest.mock.patch.object(signage.time, "sleep"):
+                result = signage.set_output(enabled, "HDMI-A-1")
+        return result, calls
+
+    def test_switching_off_also_forces_the_connector_down(self):
+        result, calls = self._output_calls(False, "connected")
+        self.assertTrue(result)
+        self.assertEqual(calls, ["wlr-randr", "off HDMI-A-1"])   # compositor first, then the signal itself
+
+    def test_switching_off_an_already_dark_connector_does_not_need_the_compositor(self):
+        result, calls = self._output_calls(False, "disconnected")
+        self.assertTrue(result)
+        self.assertEqual(calls, ["off HDMI-A-1"])
+
+    def test_without_the_helper_switching_off_is_plain_wlr_randr(self):
+        result, calls = self._output_calls(False, "connected", helper=False)
+        self.assertTrue(result)
+        self.assertEqual(calls, ["wlr-randr"])
+
+    def test_waking_a_forced_off_connector_restores_detection_then_waits_for_the_output(self):
+        result, calls = self._output_calls(True, "disconnected", wlr_fail_first=2)
+        self.assertTrue(result)
+        self.assertEqual(calls, ["detect HDMI-A-1", "wlr-randr", "wlr-randr", "wlr-randr"])
+
+    def test_waking_a_connected_output_leaves_detection_alone(self):
+        result, calls = self._output_calls(True, "connected")
+        self.assertTrue(result)
+        self.assertEqual(calls, ["wlr-randr"])
+
+    def test_the_hdmi_helper_script_accepts_only_fixed_words(self):
+        import subprocess as sp
+        script = Path(__file__).resolve().parents[1] / "scripts" / "capibarra-hdmi"
+        text = script.read_text(encoding="utf-8")
+        self.assertNotIn("\r", text)
+        for bad in (["on", "HDMI-A-1"], ["off", "all"], ["off", "../x"], ["detect", "card1"], []):
+            if sys.platform != "win32":
+                self.assertEqual(sp.run(["sh", str(script), *bad], capture_output=True).returncode, 2, bad)
 
     def test_cms_playlist_order_and_assignment(self):
         with tempfile.TemporaryDirectory() as temp:

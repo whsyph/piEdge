@@ -1,0 +1,19 @@
+#!/bin/sh
+# Force an HDMI connector off (no signal, so the monitor can sleep) or back to auto-detect.
+#   capibarra-hdmi off HDMI-A-1
+#   capibarra-hdmi detect HDMI-A-1|HDMI-A-2|all
+# Runs as root through sudo; accepts nothing but these fixed words.
+set -eu
+mode=${1:-}
+name=${2:-}
+case "$mode" in off|detect) ;; *) echo "usage: $0 off|detect HDMI-A-1|HDMI-A-2|all" >&2; exit 2 ;; esac
+case "$name" in HDMI-A-1|HDMI-A-2|all) ;; *) echo "bad connector" >&2; exit 2 ;; esac
+[ "$mode" = detect ] || [ "$name" != all ] || { echo "off needs a connector" >&2; exit 2; }
+for status in /sys/class/drm/card?-HDMI-A-?/status; do
+  [ -e "$status" ] || continue
+  connector=${status%/status}
+  connector=${connector##*/card?-}
+  if [ "$name" = all ] || [ "$name" = "$connector" ]; then
+    echo "$mode" > "$status"
+  fi
+done

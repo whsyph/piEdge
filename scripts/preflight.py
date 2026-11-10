@@ -17,7 +17,8 @@ def validate(source, model=None, config=Path('/etc/pi5-signage.json'), labwc=Pat
     if resolve_profile_name({}, detect_device_model() if model is None else model) != target:
         raise ValueError('Package/board mismatch')
     required = {'install.sh', 'signage.py', 'splash.py', 'splash.sh', 'labwc.service', 'pi5-signage.service',
-                f'profiles/{target}.json', f'config.{target}.json', 'scripts/preflight.py', 'scripts/build-release.py'}
+                f'profiles/{target}.json', f'config.{target}.json', 'scripts/preflight.py', 'scripts/build-release.py',
+                'scripts/capibarra-hdmi', 'scripts/capibarra-hdmi.sudoers'}
     hashes = manifest['files']
     if not required <= hashes.keys():
         raise ValueError('Incomplete manifest')

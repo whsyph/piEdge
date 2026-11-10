@@ -14,6 +14,9 @@ sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parent
 PAYLOAD = ('signage.py', 'splash.py', 'splash.sh', 'profiles/pi5.json')
 UNITS = ('pi5-signage.service', 'labwc.service')
+# Lets the player cut the HDMI signal for real while the schedule is off (monitor can sleep).
+HDMI_HELPER = 'scripts/capibarra-hdmi'
+HDMI_SUDOERS = 'scripts/capibarra-hdmi.sudoers'
 DEPLOYMENTS = ('/opt/pi5-signage', '/etc/pi5-signage.json', '/var/lib/pi5-signage',
                '/home/pi/museum_signage', '/home/pi/museum_video', '/opt/piEdge')
 SYSTEMD_DIRS = ('/etc/systemd/system', '/run/systemd/system',
@@ -74,7 +77,7 @@ def check(source=ROOT, root=Path('/')):
     processes = run(['ps', '-eo', 'comm=']).stdout.splitlines()
     if set(p.strip() for p in processes) & {'mpv', 'vlc', 'labwc', 'wayfire', 'weston', 'sway', 'Xorg', 'Xwayland'}:
         raise ValueError('Competing display process running; stop it explicitly first.')
-    for name in PAYLOAD + UNITS + ('config.pi5.json',):
+    for name in PAYLOAD + UNITS + ('config.pi5.json', HDMI_HELPER, HDMI_SUDOERS):
         if (source / name).is_symlink() or not (source / name).is_file():
             raise ValueError(f'Missing/unsafe payload: {name}')
     # Parse templates before apt or any target writes; preserve the legacy template.
@@ -119,6 +122,17 @@ def install(source=ROOT, root=Path('/')):
     for name in PAYLOAD:
         exclusive(app / name, lf((source / name).read_bytes()), 0o755 if name.endswith('.sh') else 0o644)
     run(['/usr/bin/python3', str(app / 'splash.py'), '--output', str(app / 'splash.ppm')])
+    sbin = root / 'usr/local/sbin'
+    sbin.mkdir(mode=0o755, parents=True, exist_ok=True)
+    exclusive(sbin / 'capibarra-hdmi', lf((source / HDMI_HELPER).read_bytes()), 0o755)
+    sudoers = root / 'etc/sudoers.d/capibarra-hdmi'
+    sudoers.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+    exclusive(sudoers, lf((source / HDMI_SUDOERS).read_bytes()), 0o440)
+    try:
+        run(['visudo', '-cf', str(sudoers)])  # a broken sudoers file would lock sudo, so validate it
+    except (OSError, subprocess.CalledProcessError):
+        sudoers.unlink()
+        raise ValueError('sudoers rule for the HDMI helper did not validate; removed it')
     config.update(media_dir='/var/lib/pi5-signage/videos')
     for key in ('playlist_file', 'schedules_file'):
         config.pop(key, None)
