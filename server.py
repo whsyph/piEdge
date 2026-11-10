@@ -1,4 +1,7 @@
+import hmac
 import os
+import re
+import secrets
 import sys
 import json
 import socket
@@ -10,6 +13,8 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 import time
 import threading
 from datetime import datetime, timezone, timedelta
+
+from media_check import ALLOWED_EXTENSIONS, check_upload, validate_upload_name
 
 # Directory settings
 if os.path.exists("/home/pi"):
@@ -38,25 +43,143 @@ OUTPUT_MODE_FILE = os.path.join(
 )
 PLAYER_SERVICE = "pi5-signage.service"
 
-# Ensure video directories exist
-os.makedirs(VIDEO_DIR_1, exist_ok=True)
-os.makedirs(VIDEO_DIR_2, exist_ok=True)
-os.makedirs(MEDIA_DIR, exist_ok=True)
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+PUBLIC_DIR = os.path.join(APP_DIR, "public")
+CONFIG_FILE = os.path.join(APP_DIR, "cms_config.json")
+TOKEN_FILE = os.path.join(APP_DIR, ".cms_token")
+
+# Operator-tunable settings (cms_config.json next to server.py; every key optional).
+DEFAULT_CONFIG = {
+    # Extra browser origins allowed to call this API (fleet dashboards on another
+    # host), e.g. ["http://192.168.8.10:8080"]. The page's own origin is always allowed.
+    "allowed_origins": [],
+    # Require "Authorization: Bearer <token>" on every /api request.
+    "require_auth": True,
+    # Legacy layar1/layar2 players use playlist.txt + mpv "loadlist"; the Pi 5
+    # supervisor reads playlists.json itself and must NOT be driven that way.
+    "legacy_players": False,
+    # Upload limits: biggest accepted file and free space that must remain afterwards.
+    "max_upload_mb": 8192,
+    "min_free_mb": 1024,
+    # Video codecs the player can render (Pi 5 has hardware decode for HEVC only).
+    "allowed_codecs": ["hevc"],
+}
+CONFIG = dict(DEFAULT_CONFIG)
+TOKEN = ""
+JSON_LOCK = threading.RLock()  # serialises read-modify-write of the shared JSON files
+# Only these suffixes are served from public/; the *.json data files are API-only.
+STATIC_TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".js": "application/javascript; charset=utf-8",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".svg": "image/svg+xml",
+    ".ico": "image/x-icon",
+    ".woff2": "font/woff2",
+}
+STATIC_JSON_ALLOWED = {"devices.json"}  # the only data file the front end reads directly
+
+
+def load_config():
+    """Merge cms_config.json over the defaults; bad values fall back to defaults."""
+    global CONFIG
+    merged = dict(DEFAULT_CONFIG)
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            user = json.load(f)
+        if isinstance(user, dict):
+            for key, default in DEFAULT_CONFIG.items():
+                if key in user and isinstance(user[key], type(default)) and not (
+                    isinstance(default, int) and isinstance(user[key], bool) and not isinstance(default, bool)
+                ):
+                    merged[key] = user[key]
+    except FileNotFoundError:
+        pass
+    except (OSError, ValueError) as exc:
+        print(f"[Config] Ignoring unreadable {CONFIG_FILE}: {exc}")
+    CONFIG = merged
+    return CONFIG
+
+
+def ensure_token():
+    """Create the API access token on first start (file mode 0600) and load it."""
+    global TOKEN
+    try:
+        with open(TOKEN_FILE, "r", encoding="utf-8") as f:
+            existing = f.read().strip()
+        if len(existing) >= 16:
+            TOKEN = existing
+            return TOKEN
+    except OSError:
+        pass
+    TOKEN = secrets.token_urlsafe(24)
+    fd = os.open(TOKEN_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(TOKEN + "\n")
+    print(f"[Auth] New access token written to {TOKEN_FILE} (read it with: cat {TOKEN_FILE})")
+    return TOKEN
+
+
+def write_json_atomic(path, data):
+    """Write JSON so concurrent readers (the player polls these files) never see a partial file."""
+    directory = os.path.dirname(os.path.abspath(path))
+    fd, temporary = tempfile.mkstemp(prefix=".tmp-", suffix=".json", dir=directory)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(temporary, 0o644)
+        os.replace(temporary, path)
+    except BaseException:
+        try:
+            os.remove(temporary)
+        except OSError:
+            pass
+        raise
+
+
+NO_CHANGE = object()  # return from a mutate() callback to skip the write
+
+
+def update_json(path, mutate, default=None):
+    """Locked read-modify-write: mutate(data) edits in place, returns a replacement,
+    or returns NO_CHANGE to leave the file untouched."""
+    with JSON_LOCK:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except FileNotFoundError:
+            if default is None:
+                raise
+            data = default() if callable(default) else default
+        result = mutate(data)
+        if result is NO_CHANGE:
+            return data
+        if result is not None:
+            data = result
+        write_json_atomic(path, data)
+        return data
+
+
+def ensure_dirs():
+    for directory in (VIDEO_DIR_1, VIDEO_DIR_2, MEDIA_DIR):
+        os.makedirs(directory, exist_ok=True)
 
 
 def init_json_files():
     if not os.path.exists(SCHEDULES_FILE):
         default_schedules = {"timezone_offset": 7, "events": []}
-        with open(SCHEDULES_FILE, "w", encoding="utf-8") as f:
-            json.dump(default_schedules, f, indent=2)
+        write_json_atomic(SCHEDULES_FILE, default_schedules)
 
     if not os.path.exists(PLAYLISTS_FILE):
         default_playlists = {
             "playlists": {"Default": []},
             "assignments": {"screen1": "Default", "screen2": "Default"},
         }
-        with open(PLAYLISTS_FILE, "w", encoding="utf-8") as f:
-            json.dump(default_playlists, f, indent=2)
+        write_json_atomic(PLAYLISTS_FILE, default_playlists)
     else:
         try:
             with open(PLAYLISTS_FILE, "r", encoding="utf-8") as f:
@@ -82,19 +205,15 @@ def init_json_files():
                             migrated["assignments"]["screen2"] = "Default_Screen2"
                 if not migrated["playlists"]:
                     migrated["playlists"]["Default"] = []
-                with open(PLAYLISTS_FILE, "w", encoding="utf-8") as f:
-                    json.dump(migrated, f, indent=2)
+                write_json_atomic(PLAYLISTS_FILE, migrated)
         except Exception as e:
             print(f"[Playlist Migration] Error: {e}")
 
     if not os.path.exists(NETWORK_CONFIG_FILE):
-        default_network = {"selected": "eth"}
-        with open(NETWORK_CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(default_network, f, indent=2)
+        write_json_atomic(NETWORK_CONFIG_FILE, {"selected": "eth"})
 
     if not os.path.exists(OUTPUT_MODE_FILE):
-        with open(OUTPUT_MODE_FILE, "w", encoding="utf-8") as f:
-            json.dump({"mode": "dual"}, f, indent=2)
+        write_json_atomic(OUTPUT_MODE_FILE, {"mode": "dual"})
 
 
 def get_network_interfaces():
@@ -157,11 +276,11 @@ def apply_network_config():
 
         if selected == "eth":
             for eth in eth_ifs:
-                subprocess.run(f"sudo ip link set dev {eth} up", shell=True)
+                subprocess.run(["sudo", "-n", "ip", "link", "set", "dev", eth, "up"], timeout=10)
 
         elif selected == "wlan":
             for wl in wlan_ifs:
-                subprocess.run(f"sudo ip link set dev {wl} up", shell=True)
+                subprocess.run(["sudo", "-n", "ip", "link", "set", "dev", wl, "up"], timeout=10)
 
     except Exception as e:
         print(f"[Network] Error applying network config: {e}")
@@ -185,6 +304,14 @@ def migrate_existing_files():
 
 
 def apply_playlist_assignments():
+    """Legacy layar1/layar2 players only: write playlist.txt and tell mpv to loadlist.
+
+    The Pi 5 supervisor reads playlists.json itself, and pushing "loadlist" into its
+    mpv replaces what the supervisor is playing, so this is a no-op unless the
+    operator enabled "legacy_players" in cms_config.json.
+    """
+    if not CONFIG.get("legacy_players"):
+        return
     try:
         if not os.path.exists(PLAYLISTS_FILE):
             return
@@ -214,14 +341,10 @@ def apply_playlist_assignments():
         print(f"[Assignments] Error applying playlist assignments: {e}")
 
 
-init_json_files()
-migrate_existing_files()
-apply_network_config()
-apply_playlist_assignments()
-
-
 # Generate default playlist if it doesn't exist
 def init_playlist_file(video_dir):
+    if not CONFIG.get("legacy_players"):
+        return
     playlist_path = os.path.join(video_dir, "playlist.txt")
     if not os.path.exists(playlist_path):
         update_playlist_file(video_dir)
@@ -239,10 +362,6 @@ def update_playlist_file(video_dir):
             # mpv requires absolute paths or paths relative to execution
             pf.write(os.path.join(video_dir, f) + "\n")
     return files
-
-
-init_playlist_file(VIDEO_DIR_1)
-init_playlist_file(VIDEO_DIR_2)
 
 
 # --- MPV IPC helpers ---
@@ -276,110 +395,163 @@ def send_mpv_command(sock_path, command_args):
 
 
 # --- Background Schedule Worker ---
+DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+
+_CLOCK_RE = re.compile(r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
+
+
+def validate_schedules(data):
+    """Raise ValueError unless data is a schedules.json the player and scheduler can follow."""
+    if not isinstance(data, dict):
+        raise ValueError("schedules must be a JSON object")
+    offset = data.get("timezone_offset", 7)
+    if isinstance(offset, bool) or not isinstance(offset, (int, float)) or not -12 <= offset <= 14:
+        raise ValueError("timezone_offset must be a number between -12 and 14")
+    events = data.get("events", [])
+    if not isinstance(events, list) or len(events) > 500:
+        raise ValueError("events must be a list (max 500)")
+    for event in events:
+        if not isinstance(event, dict):
+            raise ValueError("each event must be an object")
+        if event.get("type") not in ("power", "playlist"):
+            raise ValueError("event type must be power or playlist")
+        if not isinstance(event.get("time"), str) or not _CLOCK_RE.match(event["time"]):
+            raise ValueError("event time must be HH:MM")
+        days = event.get("days")
+        if not isinstance(days, list) or not days or any(d not in DAYS for d in days):
+            raise ValueError("event days must be a non-empty list of Mon..Sun")
+        if event["type"] == "power" and event.get("action") not in ("sleep", "wake"):
+            raise ValueError("power event action must be sleep or wake")
+    if "windows" in data and (not isinstance(data["windows"], list) or len(data["windows"]) > 200):
+        raise ValueError("windows must be a list (max 200)")
+
+
+def validate_playlists(data):
+    """Raise ValueError unless data is a playlists.json the player can follow."""
+    if not isinstance(data, dict):
+        raise ValueError("playlists must be a JSON object")
+    playlists, assignments = data.get("playlists"), data.get("assignments")
+    if not isinstance(playlists, dict) or not playlists or len(playlists) > 200:
+        raise ValueError("playlists must be a non-empty object (max 200)")
+    if not isinstance(assignments, dict):
+        raise ValueError("assignments must be an object")
+    for name, files in playlists.items():
+        if not isinstance(name, str) or not name.strip() or len(name) > 100:
+            raise ValueError("playlist names must be 1-100 characters")
+        if not isinstance(files, list) or len(files) > 1000:
+            raise ValueError(f'playlist "{name}" must be a list (max 1000 items)')
+        for item in files:
+            if not isinstance(item, str) or not item or os.path.basename(item) != item or item.startswith("."):
+                raise ValueError(f'playlist "{name}" has an invalid file name')
+    for screen, name in assignments.items():
+        if screen not in ("screen1", "screen2") or name not in playlists:
+            raise ValueError("assignments must map screen1/screen2 to an existing playlist")
+
+
+def assigned_playlist(screen):
+    """File names of the playlist assigned to a screen in playlists.json ([] if unreadable)."""
+    try:
+        with open(PLAYLISTS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        name = data.get("assignments", {}).get(f"screen{screen}")
+        files = data.get("playlists", {}).get(name, [])
+        return [x for x in files if isinstance(x, str)]
+    except (OSError, ValueError, AttributeError):
+        return []
+
+
+def read_device_model():
+    try:
+        with open("/proc/device-tree/model", "rb") as f:
+            return f.read().rstrip(b"\x00").decode("utf-8", "replace").strip()
+    except OSError:
+        return ""
+
+
+def assign_playlist(screen, playlist_name, must_exist=False):
+    """Point a screen at a playlist (atomic, locked) and notify legacy players."""
+
+    def mutate(data):
+        if not isinstance(data, dict):
+            data = {}
+        data.setdefault("playlists", {})
+        if must_exist and playlist_name not in data["playlists"]:
+            raise LookupError(playlist_name)
+        data.setdefault("assignments", {})[f"screen{screen}"] = playlist_name
+
+    update_json(PLAYLISTS_FILE, mutate, default=lambda: {"playlists": {"Default": []}, "assignments": {}})
+    apply_playlist_assignments()
+
+
+def schedule_tick(now=None):
+    """Fire the schedule events that are due this minute once; returns the fired events."""
+    fired = []
+
+    def mutate(data):
+        try:
+            tz = timezone(timedelta(hours=float(data.get("timezone_offset", 7))))
+        except (TypeError, ValueError, OverflowError):
+            tz = timezone(timedelta(hours=7))
+        current = now.astimezone(tz) if now is not None else datetime.now(tz)
+        stamp = current.strftime("%Y-%m-%d %H:%M")
+        curr_time = current.strftime("%H:%M")
+        curr_day = DAYS[current.weekday()]
+        for event in data.get("events", []):
+            if not event.get("enabled", True):
+                continue
+            if event.get("time") == curr_time and curr_day in event.get("days", []):
+                # Prevent re-triggering in the same minute
+                if event.get("_last_triggered") == stamp:
+                    continue
+                event["_last_triggered"] = stamp
+                fired.append(dict(event))
+        return None if fired else NO_CHANGE
+
+    try:
+        update_json(SCHEDULES_FILE, mutate)
+    except FileNotFoundError:
+        return []
+
+    # Side effects happen outside the file lock.
+    for event in fired:
+        print(f"[Schedule] Triggering Event {event.get('id')} - {event.get('type')}")
+        try:
+            if event.get("type") == "playlist":
+                assign_playlist(int(event.get("screen", 1)), event.get("playlist_name", "Default"))
+            elif event.get("type") == "power" and CONFIG.get("legacy_players") and IS_PI:
+                # Legacy players only; the Pi 5 supervisor follows schedules.json itself.
+                subprocess.run(
+                    ["sudo", "systemctl", "stop", "layar1.service", "layar2.service", "layar-gabungan.service"],
+                    timeout=20,
+                )
+        except Exception as e:
+            print(f"[Schedule] Event {event.get('id')} failed: {e}")
+    return fired
+
+
 def check_schedules():
     while True:
         try:
-            with open(SCHEDULES_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-
-            tz_offset = data.get("timezone_offset", 7)
-            tz = timezone(timedelta(hours=tz_offset))
-            now = datetime.now(tz)
-
-            curr_time = now.strftime("%H:%M")
-            # Locale-independent mapping
-            days_map = {
-                0: "Mon",
-                1: "Tue",
-                2: "Wed",
-                3: "Thu",
-                4: "Fri",
-                5: "Sat",
-                6: "Sun",
-            }
-            curr_day = days_map[now.weekday()]
-
-            changed = False
-
-            for event in data.get("events", []):
-                if not event.get("enabled", True):
-                    continue
-
-                if event.get("time") == curr_time and curr_day in event.get("days", []):
-                    last_triggered = event.get("_last_triggered", "")
-                    # Prevent re-triggering in the same minute
-                    if last_triggered == now.strftime("%Y-%m-%d %H:%M"):
-                        continue
-
-                    event["_last_triggered"] = now.strftime("%Y-%m-%d %H:%M")
-                    changed = True
-                    print(
-                        f"[Schedule] Triggering Event {event.get('id')} - {event.get('type')}"
-                    )
-
-                    if event.get("type") == "power":
-                        action = event.get("action")
-                        if action == "sleep":
-                            if IS_PI:
-                                # Legacy players only; pi5-signage now self-manages via schedules_file (schedules_allow)
-                                subprocess.run(
-                                    "sudo systemctl stop layar1.service layar2.service layar-gabungan.service",
-                                    shell=True,
-                                )
-                                # HDMI off optional: keep skipped if wlr-randr not installed
-                        elif action == "wake":
-                            if IS_PI:
-                                # Legacy players only; pi5-signage now self-manages via schedules_file (schedules_allow)
-                                subprocess.run(
-                                    "sudo systemctl stop layar1.service layar2.service layar-gabungan.service",
-                                    shell=True,
-                                )
-
-                    elif event.get("type") == "playlist":
-                        screen = int(event.get("screen", 1))
-                        playlist_name = event.get("playlist_name", "Default")
-
-                        try:
-                            with open(PLAYLISTS_FILE, "r+", encoding="utf-8") as pf:
-                                pl_data = json.load(pf)
-                                playlists = pl_data.get("playlists", {})
-                                files = playlists.get(playlist_name, [])
-
-                                upload_dir = VIDEO_DIR_1 if screen == 1 else VIDEO_DIR_2
-                                playlist_path = os.path.join(upload_dir, "playlist.txt")
-
-                                with open(playlist_path, "w", encoding="utf-8") as pt:
-                                    for fname in files:
-                                        f_path = os.path.join(MEDIA_DIR, fname)
-                                        if os.path.exists(f_path):
-                                            pt.write(f_path + "\n")
-
-                                pl_data.setdefault("assignments", {})[
-                                    f"screen{screen}"
-                                ] = playlist_name
-                                pf.seek(0)
-                                json.dump(pl_data, pf, indent=2)
-                                pf.truncate()
-
-                            sock_path = SOCK_1 if screen == 1 else SOCK_2
-                            if IS_PI and os.path.exists(sock_path):
-                                send_mpv_command(sock_path, ["loadlist", playlist_path])
-
-                        except Exception as e:
-                            print(f"[Schedule] Playlist error: {e}")
-
-            if changed:
-                with open(SCHEDULES_FILE, "w", encoding="utf-8") as f:
-                    json.dump(data, f, indent=2)
-
+            schedule_tick()
         except Exception as e:
-            pass  # Suppress file read/write errors if they occur concurrently
-
+            print(f"[Schedule] Tick failed: {e}")
         time.sleep(30)
 
 
-schedule_thread = threading.Thread(target=check_schedules, daemon=True)
-schedule_thread.start()
+def startup():
+    """Create folders/files, token and the schedule thread (kept out of import so tests can import)."""
+    load_config()
+    ensure_dirs()
+    init_json_files()
+    migrate_existing_files()
+    apply_network_config()
+    apply_playlist_assignments()
+    init_playlist_file(VIDEO_DIR_1)
+    init_playlist_file(VIDEO_DIR_2)
+    if CONFIG.get("require_auth"):
+        ensure_token()
+    threading.Thread(target=check_schedules, daemon=True).start()
 
 
 # --- System resource metrics (Linux/Pi) ---
@@ -488,7 +660,36 @@ def get_service_status(service_name):
 
 
 # --- Custom Multipart Parser for streaming upload ---
-def parse_multipart_upload(rfile, content_length, boundary, upload_dir):
+class UploadRejected(Exception):
+    """A validation failure that maps to an HTTP status (413, 415, 409, ...)."""
+
+    def __init__(self, status, message):
+        super().__init__(message)
+        self.status = status
+        self.message = message
+
+
+_FILENAME_RE = re.compile(r'filename=(?:"((?:[^"\\]|\\.)*)"|([^;]*))', re.IGNORECASE)
+
+
+def extract_upload_filename(disposition):
+    """File name from a Content-Disposition header (handles ';' and '=' inside names)."""
+    match = _FILENAME_RE.search(disposition)
+    if not match:
+        return None
+    raw = match.group(1) if match.group(1) is not None else (match.group(2) or "").strip()
+    raw = raw.replace('\\"', '"').replace("%22", '"')  # browsers escape quotes this way
+    return raw.replace("\\", "/").split("/")[-1]  # drop any client-side directory part
+
+
+def parse_multipart_upload(
+    rfile, content_length, boundary, upload_dir, check_name=None, check_file=None
+):
+    """Stream one multipart file part to upload_dir.
+
+    check_name(name) runs before any body byte is stored, check_file(temp_path, name)
+    after the whole part arrived but before it is published; both raise UploadRejected.
+    """
     boundary_bytes = b"--" + boundary.encode("utf-8")
     closing_boundary = b"\r\n" + boundary_bytes + b"--"
     bytes_read = 0
@@ -516,16 +717,13 @@ def parse_multipart_upload(rfile, content_length, boundary, upload_dir):
         if not line:
             break
         if line.lower().startswith(b"content-disposition:"):
-            parts = line.decode("utf-8", errors="ignore").split(";")
-            for p in parts:
-                if "filename=" in p:
-                    filename = p.split("=")[1].strip(' "')
-                    break
+            filename = extract_upload_filename(line.decode("utf-8", errors="replace"))
 
     if not filename:
         return False, "Filename not found in form data"
 
-    filename = os.path.basename(filename)
+    if check_name:
+        check_name(filename)
     dest_path = os.path.join(upload_dir, filename)
 
     # Stream into a temporary file. Only expose the final filename after the
@@ -572,6 +770,8 @@ def parse_multipart_upload(rfile, content_length, boundary, upload_dir):
         if not boundary_found:
             return False, "Upload incomplete: closing multipart boundary not found"
 
+        if check_file:
+            check_file(temp_path, filename)
         os.chmod(temp_path, 0o644)
         os.replace(temp_path, dest_path)
         temp_path = None
@@ -586,23 +786,121 @@ def parse_multipart_upload(rfile, content_length, boundary, upload_dir):
                 pass
 
 
+class _CountingReader:
+    """Wraps the request stream to learn how much of the body a handler consumed."""
+
+    def __init__(self, raw):
+        self._raw = raw
+        self.count = 0
+
+    def read(self, size=-1):
+        data = self._raw.read(size)
+        self.count += len(data)
+        return data
+
+    def readline(self, size=-1):
+        data = self._raw.readline(size)
+        self.count += len(data)
+        return data
+
+    def __getattr__(self, name):
+        return getattr(self._raw, name)
+
+
+DRAIN_LIMIT = 32 * 1024 * 1024  # most unread body bytes discarded so the client can read our error
+
+
 # --- HTTP Request Handler ---
 class SignageRequestHandler(BaseHTTPRequestHandler):
 
+    def version_string(self):
+        return "capibarra-cms"  # no Python/BaseHTTP version banner
+
+    def _allowed_origin(self, origin):
+        host = self.headers.get("Host", "")
+        allowed = set(CONFIG.get("allowed_origins", []))
+        if host:
+            allowed.update((f"http://{host}", f"https://{host}"))
+        return origin in allowed
+
     def send_cors_headers(self):
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        """Headers for every response: CORS only for allowed origins, plus hardening."""
+        origin = self.headers.get("Origin")
+        if origin and self._allowed_origin(origin):
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+
+    def _json_error(self, status, message):
+        body = json.dumps({"success": False, "error": message}).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        if status == 401:
+            self.send_header("WWW-Authenticate", "Bearer")
+        self.send_cors_headers()
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _is_authorized(self):
+        if not CONFIG.get("require_auth"):
+            return True
+        header = self.headers.get("Authorization", "")
+        if not header.startswith("Bearer ") or not TOKEN:
+            return False
+        return hmac.compare_digest(header[7:].strip().encode("utf-8"), TOKEN.encode("utf-8"))
+
+    def _gate(self, path, is_post):
+        """True when the request may proceed; otherwise the error response was already sent."""
+        origin = self.headers.get("Origin")
+        if origin and (is_post or path.startswith("/api/")) and not self._allowed_origin(origin):
+            self._json_error(403, "origin not allowed")
+            return False
+        if path.startswith("/api/") and not self._is_authorized():
+            time.sleep(0.3)  # slow down token guessing
+            self._json_error(401, "authentication required")
+            return False
+        if is_post:
+            content_type = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+            expected = "multipart/form-data" if path == "/api/upload" else "application/json"
+            if content_type != expected:
+                self._json_error(415, f"Content-Type must be {expected}")
+                return False
+        return True
 
     def do_OPTIONS(self):
-        self.send_response(200)
+        origin = self.headers.get("Origin")
+        if origin and not self._allowed_origin(origin):
+            self._json_error(403, "origin not allowed")
+            return
+        self.send_response(204)
         self.send_cors_headers()
+        self.send_header("Access-Control-Max-Age", "600")
         self.end_headers()
 
     def do_GET(self):
+        try:
+            self._do_get()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except Exception as exc:  # never drop the connection without an answer
+            print(f"[GET {self.path}] {exc!r}")
+            try:
+                self._json_error(500, "internal error")
+            except OSError:
+                pass
+
+    def _do_get(self):
         parsed_url = urllib.parse.urlparse(self.path)
         path = parsed_url.path
         query = urllib.parse.parse_qs(parsed_url.query)
+
+        if not self._gate(path, False):
+            return
 
         # --- API Endpoints ---
         if path == "/api/status":
@@ -636,48 +934,85 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
             self.handle_api_output_mode()
             return
 
-        # --- Static Files Router ---
+        self._serve_static(path)
+
+    def _serve_static(self, path):
+        """Serve UI assets from public/ only: known suffixes, no dotfiles, no data JSON."""
         if path == "/":
             path = "/index.html"
+        relative = path.lstrip("/")
+        base = os.path.realpath(PUBLIC_DIR)
+        target_file = os.path.realpath(os.path.join(base, relative))
 
-        # Locate static files inside the 'public' subfolder
-        local_base = os.path.join(os.path.dirname(__file__), "public")
-        target_file = os.path.abspath(os.path.join(local_base, path.lstrip("/")))
-
-        # Security check to prevent directory traversal
-        if not target_file.startswith(local_base):
+        try:
+            inside = os.path.commonpath([target_file, base]) == base
+        except ValueError:  # e.g. different drive on Windows
+            inside = False
+        if not inside or os.path.basename(target_file).startswith("."):
             self.send_error(403, "Access Forbidden")
             return
 
-        if os.path.exists(target_file) and os.path.isfile(target_file):
-            self.send_response(200)
-            self.send_cors_headers()
-
-            # Content-Type Header
-            if target_file.endswith(".html"):
-                self.send_header("Content-Type", "text/html")
-            elif target_file.endswith(".css"):
-                self.send_header("Content-Type", "text/css")
-            elif target_file.endswith(".js"):
-                self.send_header("Content-Type", "application/javascript")
-            elif target_file.endswith(".json"):
-                self.send_header("Content-Type", "application/json")
-            elif target_file.endswith(".png"):
-                self.send_header("Content-Type", "image/png")
-            elif target_file.endswith(".jpg") or target_file.endswith(".jpeg"):
-                self.send_header("Content-Type", "image/jpeg")
-            else:
-                self.send_header("Content-Type", "application/octet-stream")
-
-            self.end_headers()
-            with open(target_file, "rb") as f:
-                self.wfile.write(f.read())
-        else:
+        extension = os.path.splitext(target_file)[1].lower()
+        content_type = STATIC_TYPES.get(extension)
+        if extension == ".json" and os.path.relpath(target_file, base).replace(os.sep, "/") in STATIC_JSON_ALLOWED:
+            content_type = "application/json"
+        if content_type is None or not os.path.isfile(target_file):
             self.send_error(404, "File Not Found")
+            return
+
+        with open(target_file, "rb") as f:
+            body = f.read()
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_cors_headers()
+        self.end_headers()
+        self.wfile.write(body)
 
     def do_POST(self):
+        reader = _CountingReader(self.rfile)
+        self.rfile = reader
+        try:
+            self._do_post()
+        except (BrokenPipeError, ConnectionResetError):
+            return
+        except Exception as exc:
+            print(f"[POST {self.path}] {exc!r}")
+            try:
+                self._json_error(500, "internal error")
+            except OSError:
+                pass
+        self._drain_unread_body(reader)
+
+    def _drain_unread_body(self, reader):
+        """After answering early (401/413/415...), swallow the rest of a modest body.
+
+        Closing with unread data makes the OS reset the connection, and the browser
+        then reports a network error instead of showing our JSON error message.
+        """
+        try:
+            declared = int(self.headers.get("Content-Length", 0))
+        except (TypeError, ValueError):
+            return
+        remaining = declared - reader.count
+        if remaining <= 0 or remaining > DRAIN_LIMIT:
+            return
+        try:
+            self.connection.settimeout(3)
+            while remaining > 0:
+                chunk = reader.read(min(65536, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+        except OSError:
+            pass
+
+    def _do_post(self):
         parsed_url = urllib.parse.urlparse(self.path)
         path = parsed_url.path
+
+        if not self._gate(path, True):
+            return
 
         if path == "/api/control":
             self.handle_api_control()
@@ -770,17 +1105,20 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
                 else []
             )
 
-            # Get actual playlist order from playlist.txt
-            playlist_path = os.path.join(video_dir, "playlist.txt")
+            # Playlist order: legacy players use playlist.txt, the Pi 5 player uses playlists.json
             playlist_order = []
-            if os.path.exists(playlist_path):
-                with open(playlist_path, "r", encoding="utf-8") as pf:
-                    for line in pf:
-                        f_path = line.strip()
-                        if f_path:
-                            fname = os.path.basename(f_path)
-                            if fname in all_files:
-                                playlist_order.append(fname)
+            if CONFIG.get("legacy_players"):
+                playlist_path = os.path.join(video_dir, "playlist.txt")
+                if os.path.exists(playlist_path):
+                    with open(playlist_path, "r", encoding="utf-8") as pf:
+                        for line in pf:
+                            f_path = line.strip()
+                            if f_path:
+                                fname = os.path.basename(f_path)
+                                if fname in all_files:
+                                    playlist_order.append(fname)
+            else:
+                playlist_order = [f for f in assigned_playlist(screen_num) if f in all_files]
 
             # Get file sizes
             files_data = []
@@ -852,11 +1190,21 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
+        sys_stats["model"] = read_device_model()
         response_data = {
             "system": sys_stats,
             "screen1": screen1,
             "screen2": screen2,
             "audio": audio_cfg,
+            # Lets the UI hide controls this device cannot honour.
+            "capabilities": {
+                "transport_controls": False,  # the Pi 5 player has no prev/next/play/pause IPC
+                "dual_output": False,
+                "max_upload_mb": CONFIG["max_upload_mb"],
+                "allowed_codecs": CONFIG["allowed_codecs"],
+                "allowed_extensions": list(ALLOWED_EXTENSIONS),
+                "auth_required": CONFIG["require_auth"],
+            },
         }
 
         self.send_response(200)
@@ -973,12 +1321,44 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
         try:
             content_length = int(self.headers.get("Content-Length", 0))
         except (TypeError, ValueError):
-            self.send_error(400, "Invalid Content-Length")
+            self._json_error(400, "Invalid Content-Length")
             return
 
-        success, info = parse_multipart_upload(
-            self.rfile, content_length, boundary, MEDIA_DIR
-        )
+        max_bytes = int(CONFIG["max_upload_mb"]) * 1024 * 1024
+        reserve = int(CONFIG["min_free_mb"]) * 1024 * 1024
+        if content_length <= 0:
+            self._json_error(411, "Content-Length is required")
+            return
+        if content_length > max_bytes:
+            self._json_error(413, f"File is larger than the {CONFIG['max_upload_mb']} MB upload limit")
+            return
+        try:
+            free = shutil.disk_usage(MEDIA_DIR).free
+        except OSError:
+            free = None
+        if free is not None and free - content_length < reserve:
+            self._json_error(507, "Not enough free disk space for this upload")
+            return
+
+        def check_name(name):
+            ok, message = validate_upload_name(name)
+            if not ok:
+                raise UploadRejected(415 if "type" in message else 400, message)
+            if os.path.exists(os.path.join(MEDIA_DIR, name)):
+                raise UploadRejected(409, f'"{name}" already exists; delete it first or rename the new file')
+
+        def check_file(path, name):
+            ok, message = check_upload(path, name, CONFIG["allowed_codecs"])
+            if not ok:
+                raise UploadRejected(415, message)
+
+        try:
+            success, info = parse_multipart_upload(
+                self.rfile, content_length, boundary, MEDIA_DIR, check_name, check_file
+            )
+        except UploadRejected as rejected:
+            self._json_error(rejected.status, rejected.message)
+            return
 
         if success:
             res = {"success": True, "filename": info}
@@ -988,7 +1368,7 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps(res).encode("utf-8"))
         else:
-            self.send_error(500, f"Upload failed: {info}")
+            self._json_error(400, f"Upload failed: {info}")
 
     def handle_api_delete(self):
         content_length = int(self.headers.get("Content-Length", 0))
@@ -998,37 +1378,34 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
             params = json.loads(post_data)
             filename = params.get("filename", "")
 
-            if not filename:
-                self.send_error(400, "Filename parameter missing")
+            # Only a plain file name inside MEDIA_DIR is acceptable: no separators, no dotfiles.
+            if (
+                not isinstance(filename, str)
+                or not filename
+                or os.path.basename(filename) != filename
+                or filename.startswith(".")
+            ):
+                self._json_error(400, "Invalid filename")
                 return
 
-            target_path = os.path.abspath(os.path.join(MEDIA_DIR, filename))
-
-            # Security check
-            if not target_path.startswith(MEDIA_DIR):
-                self.send_error(403, "Access Forbidden")
-                return
+            target_path = os.path.join(MEDIA_DIR, filename)
 
             res = {"success": False, "error": "File not found"}
-            if os.path.exists(target_path):
+            if os.path.isfile(target_path):
                 os.remove(target_path)
 
-                # Cleanup from playlists
-                try:
-                    with open(PLAYLISTS_FILE, "r+", encoding="utf-8") as f:
-                        pl_data = json.load(f)
-                        playlists = pl_data.get("playlists", {})
-                        changed = False
-                        for pl_name, files in playlists.items():
-                            if filename in files:
-                                playlists[pl_name] = [x for x in files if x != filename]
-                                changed = True
-                        if changed:
-                            f.seek(0)
-                            json.dump(pl_data, f, indent=2)
-                            f.truncate()
+                # Cleanup from playlists (atomic and locked: the player reads this file)
+                def drop_from_playlists(data):
+                    changed = False
+                    for pl_name, files in data.get("playlists", {}).items():
+                        if filename in files:
+                            data["playlists"][pl_name] = [x for x in files if x != filename]
+                            changed = True
+                    return None if changed else NO_CHANGE
 
-                    # Re-apply assignments to keep screens in sync
+                try:
+                    update_json(PLAYLISTS_FILE, drop_from_playlists)
+                    # Re-apply assignments to keep legacy screens in sync
                     apply_playlist_assignments()
                 except Exception as e:
                     print(f"[Delete cleanup] Error: {e}")
@@ -1044,6 +1421,9 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
             self.send_error(500, f"Error deleting file: {e}")
 
     def handle_api_playlist_save(self):
+        if not CONFIG.get("legacy_players"):
+            self._json_error(409, "Legacy per-screen playlists are disabled; use /api/playlists/save_all")
+            return
         content_length = int(self.headers.get("Content-Length", 0))
         post_data = self.rfile.read(content_length).decode("utf-8")
 
@@ -1079,7 +1459,13 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
             self.send_error(500, f"Error saving playlist: {e}")
 
     def handle_api_screenshot(self, query):
-        screen = int(query.get("screen", [1])[0])
+        try:
+            screen = int(query.get("screen", [1])[0])
+        except (TypeError, ValueError):
+            screen = 0
+        if screen not in (1, 2):
+            self._json_error(400, "screen must be 1 or 2")
+            return
         sock_path = SOCK_1 if screen == 1 else SOCK_2
 
         # Temp preview path
@@ -1223,23 +1609,23 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
             filename = params.get("filename", "")
             mute = params.get("mute", False)
 
-            if not filename:
-                self.send_error(400, "Filename missing")
+            if not isinstance(filename, str) or not filename:
+                self._json_error(400, "Filename missing")
+                return
+            if not isinstance(mute, bool):
+                self._json_error(400, "mute must be true or false")
                 return
 
             config_path = os.path.join(
                 os.path.dirname(__file__), "public", "audio_config.json"
             )
-            with open(config_path, "r+", encoding="utf-8") as f:
-                data = json.load(f)
-                screen_key = f"screen{screen}"
+            screen_key = f"screen{screen}"
+
+            def set_clip_mute(data):
                 if screen_key in data:
-                    if "clip_settings" not in data[screen_key]:
-                        data[screen_key]["clip_settings"] = {}
-                    data[screen_key]["clip_settings"][filename] = {"mute": mute}
-                f.seek(0)
-                json.dump(data, f, indent=2)
-                f.truncate()
+                    data[screen_key].setdefault("clip_settings", {})[filename] = {"mute": mute}
+
+            data = update_json(config_path, set_clip_mute)
 
             # If currently playing this file, apply mute state
             sock_path = SOCK_1 if screen == 1 else SOCK_2
@@ -1279,9 +1665,22 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
         post_data = self.rfile.read(content_length).decode("utf-8")
         try:
             params = json.loads(post_data)
-            # Basic conflict checking can be done here or in UI. We'll rely on UI for now or just save it.
-            with open(SCHEDULES_FILE, "w", encoding="utf-8") as f:
-                json.dump(params, f, indent=2)
+            try:
+                validate_schedules(params)
+            except ValueError as exc:
+                self._json_error(400, str(exc))
+                return
+
+            def replace_schedules(old):
+                # The scheduler stamps events when they fire; keep those stamps so a save
+                # from a stale page cannot make an event fire a second time.
+                stamps = {e.get("id"): e.get("_last_triggered") for e in old.get("events", []) if isinstance(e, dict)}
+                for event in params.get("events", []):
+                    if event.get("id") in stamps and stamps[event["id"]] and "_last_triggered" not in event:
+                        event["_last_triggered"] = stamps[event["id"]]
+                return params
+
+            update_json(SCHEDULES_FILE, replace_schedules, default=dict)
 
             res = {"success": True, "message": "Schedule saved"}
             self.send_response(200)
@@ -1309,8 +1708,12 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
         post_data = self.rfile.read(content_length).decode("utf-8")
         try:
             params = json.loads(post_data)
-            with open(PLAYLISTS_FILE, "w", encoding="utf-8") as f:
-                json.dump(params, f, indent=2)
+            try:
+                validate_playlists(params)
+            except ValueError as exc:
+                self._json_error(400, str(exc))
+                return
+            update_json(PLAYLISTS_FILE, lambda _old: params, default=dict)
 
             apply_playlist_assignments()
 
@@ -1335,7 +1738,7 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
         def run_shutdown():
             time.sleep(1)
             if IS_PI:
-                subprocess.run("sudo shutdown -h now", shell=True)
+                subprocess.run(["sudo", "-n", "shutdown", "-h", "now"], timeout=20)
 
         threading.Thread(target=run_shutdown, daemon=True).start()
 
@@ -1367,9 +1770,11 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
         try:
             params = json.loads(post_data)
             selected = params.get("selected", "eth")
+            if selected not in ("eth", "wlan"):
+                self._json_error(400, "selected must be eth or wlan")
+                return
 
-            with open(NETWORK_CONFIG_FILE, "w", encoding="utf-8") as f:
-                json.dump({"selected": selected}, f, indent=2)
+            write_json_atomic(NETWORK_CONFIG_FILE, {"selected": selected})
 
             def do_apply():
                 time.sleep(0.5)
@@ -1396,15 +1801,14 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
             params = json.loads(post_data)
             screen = int(params.get("screen", 1))
             playlist_name = params.get("playlist_name", "Default")
-
-            with open(PLAYLISTS_FILE, "r+", encoding="utf-8") as f:
-                data = json.load(f)
-                data.setdefault("assignments", {})[f"screen{screen}"] = playlist_name
-                f.seek(0)
-                json.dump(data, f, indent=2)
-                f.truncate()
-
-            apply_playlist_assignments()
+            if screen not in (1, 2) or not isinstance(playlist_name, str):
+                self._json_error(400, "screen must be 1 or 2 and playlist_name a string")
+                return
+            try:
+                assign_playlist(screen, playlist_name, must_exist=True)
+            except LookupError:
+                self._json_error(404, f"Playlist {playlist_name!r} does not exist")
+                return
 
             res = {
                 "success": True,
@@ -1420,6 +1824,7 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
 
 
 def run_server(port=8080):
+    startup()
     server_address = ("", port)
     httpd = ThreadingHTTPServer(server_address, SignageRequestHandler)
     print(f"Museum Signage CMS Backend serving on port {port}...")
