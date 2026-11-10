@@ -160,7 +160,7 @@ done
 [[ -n "$ok" ]] || { sudo journalctl -u cms-signage -n 20 --no-pager; die "the CMS did not answer on port 8080"; }
 code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/api/status)"
 [[ "$code" == "401" ]] || echo "WARNING: /api/status answered $code without a token (expected 401)"
-sudo systemctl restart pi5-signage.service 2>/dev/null || true
+sudo systemctl try-restart pi5-signage.service 2>/dev/null || true   # only if the player is already running; never start a disabled one
 
 IP="$(hostname -I | awk '{print $1}')"
 cat <<EOF
