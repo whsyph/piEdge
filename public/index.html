@@ -4,14 +4,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pi Multi Device Video Player System</title>
+    <title>caPIbarra CMS</title>
     <link rel="icon" type="image/png" href="logo.png">
-    <link rel="stylesheet" href="app.css">
-    <!-- Google Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&display=swap"
-        rel="stylesheet">
+    <link rel="stylesheet" href="app.css?v=cms-hardening-2">
 </head>
 
 <body>
@@ -118,7 +113,7 @@
                     </div>
 
                     <div class="control-mode-grid">
-                    <div class="output-mode-card">
+                    <div id="output-mode-card" class="output-mode-card">
                         <div>
                             <h3 data-i18n="output_mode_title">Mode Output HDMI</h3>
                             <p data-i18n="output_mode_sub">Gunakan Single untuk video 4K60 agar beban Raspberry Pi lebih ringan.</p>
@@ -138,7 +133,7 @@
 
                     <div class="screens-row">
                         <!-- Screen 1 Card -->
-                        <div class="screen-card">
+                        <div id="screen1-card" class="screen-card">
                             <div class="screen-header-bar">
                                 <h3 data-i18n="screen1_title">Layar 1 (HDMI-A-1)</h3>
                                 <span id="s1-status-badge" class="badge badge-error">Offline</span>
@@ -222,7 +217,7 @@
                         </div>
 
                         <!-- Screen 2 Card -->
-                        <div class="screen-card">
+                        <div id="screen2-card" class="screen-card">
                             <div class="screen-header-bar">
                                 <h3 data-i18n="screen2_title">Layar 2 (HDMI-A-2)</h3>
                                 <span id="s2-status-badge" class="badge badge-error">Offline</span>
@@ -321,7 +316,7 @@
                             <div class="upload-zone" id="drop-zone">
                                 <div class="upload-icon">📤</div>
                                 <p data-i18n="drop_zone">Tarik & lepas file video di sini, atau klik untuk memilih</p>
-                                <span class="upload-hint" data-i18n="supported_formats">Format yang didukung: MP4, MKV, AVI, MOV</span>
+                                <span class="upload-hint" id="upload-hint">Format: MP4, MKV, MOV · codec HEVC</span>
                                 <input type="file" id="file-input" accept="video/*" style="display: none;">
                             </div>
 
@@ -427,7 +422,7 @@
                             </div>
                             <div class="diag-meta">
                                 <p><strong data-i18n="uptime_label">Uptime</strong>: <span id="diag-uptime">-</span></p>
-                                <p data-i18n="device_model">Model: Raspberry Pi 4 Model B</p>
+                                <p><strong data-i18n="device_model">Model</strong>: <span id="diag-model">-</span></p>
                             </div>
                         </div>
 
@@ -573,7 +568,7 @@
                     <div class="about-card">
                         <div class="about-logo-wrapper">
                             <div class="about-logo"></div>
-                            <h3>piEdge CMS Signage</h3>
+                            <h3>caPIbarra CMS</h3>
                             <span>Version 0.1.0</span>
                             <span class="developer-credit">Developed by imajiwa.lab</span>
                         </div>
@@ -623,6 +618,23 @@
 
             </section>
         </main>
+    </div>
+
+    <!-- Access token dialog -->
+    <div id="auth-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+        <div class="modal-content">
+            <h3 id="auth-title">Token akses diperlukan</h3>
+            <p class="help-text">Perangkat <code id="auth-origin"></code> meminta token. Baca di Pi dengan:
+                <code>cat /home/pi/museum_signage/.cms_token</code></p>
+            <div class="form-group margin-top-sm">
+                <label for="auth-token-input">Token:</label>
+                <input type="password" id="auth-token-input" class="form-input" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="modal-actions margin-top-md">
+                <button id="auth-cancel" class="btn btn-secondary" type="button">Batal</button>
+                <button id="auth-submit" class="btn btn-primary" type="button">Masuk</button>
+            </div>
+        </div>
     </div>
 
     <!-- Toast Notification -->
@@ -686,8 +698,8 @@
         </div>
     </div>
 
-    <script src="app.js?v=audio-ipc-1"></script>
-    <script src="operation-ui.js?v=1"></script>
+    <script src="app.js?v=cms-hardening-1"></script>
+    <script src="operation-ui.js?v=2"></script>
 </body>
 
 </html>

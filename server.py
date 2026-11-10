@@ -965,9 +965,24 @@ class SignageRequestHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
+        # UI code must refresh after an update; only images may be reused from cache.
+        self.send_header("Cache-Control", "max-age=3600" if extension in (".png", ".jpg", ".jpeg", ".ico", ".woff2") else "no-cache")
         self.send_cors_headers()
         self.end_headers()
         self.wfile.write(body)
+
+    def do_HEAD(self):
+        """Health probes (and some browsers) use HEAD: answer like GET without the body."""
+        path = urllib.parse.urlparse(self.path).path
+        if path.startswith("/api/") and not self._is_authorized():
+            self.send_response(401)
+        elif path in ("/", "/index.html"):
+            self.send_response(200)
+            self.send_header("Content-Type", STATIC_TYPES[".html"])
+        else:
+            self.send_response(404)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def do_POST(self):
         reader = _CountingReader(self.rfile)

@@ -1,0 +1,7 @@
+# Allow only what the CMS needs (install as /etc/sudoers.d/cms-signage, mode 0440; check with: visudo -cf).
+# NOTE: Raspberry Pi OS also ships /etc/sudoers.d/010_pi-nopasswd (full passwordless sudo for pi);
+# these lines only restrict anything once that file is removed.
+Cmnd_Alias CMS_PLAYER = /usr/bin/systemctl start pi5-signage.service, /usr/bin/systemctl stop pi5-signage.service, /usr/bin/systemctl restart pi5-signage.service
+Cmnd_Alias CMS_NET    = /usr/sbin/ip link set dev eth* up, /usr/sbin/ip link set dev en* up, /usr/sbin/ip link set dev wlan* up, /usr/sbin/ip link set dev wl* up
+Cmnd_Alias CMS_POWER  = /usr/sbin/shutdown -h now
+pi ALL=(root) NOPASSWD: CMS_PLAYER, CMS_NET, CMS_POWER

@@ -7,3 +7,5 @@ public/output_mode.json
 .DS_Store
 Thumbs.db
 *.log
+
+.cms_token

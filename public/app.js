@@ -1,5 +1,184 @@
 // Museum Signage CMS - Frontend Controller
 
+// ---------------------------------------------------------------------------
+// Access token, safe HTML and device capabilities
+// ---------------------------------------------------------------------------
+const nativeFetch = window.fetch.bind(window);
+const TOKEN_STORE = "capibarra_tokens";
+const LOCAL_DEVICE_ID = "this-device";
+const authDeniedUntil = {};
+let pendingAuth = null;
+let deviceCaps = {};
+
+function loadTokens() {
+  try {
+    return JSON.parse(localStorage.getItem(TOKEN_STORE) || "{}");
+  } catch (e) {
+    return {};
+  }
+}
+
+function getToken(origin) {
+  return loadTokens()[origin] || "";
+}
+
+function saveToken(origin, token) {
+  const map = loadTokens();
+  if (token) map[origin] = token;
+  else delete map[origin];
+  try {
+    localStorage.setItem(TOKEN_STORE, JSON.stringify(map));
+  } catch (e) {
+    /* storage blocked: the token only lives for this page view */
+  }
+}
+
+// Ask the operator for the device's access token (one dialog at a time).
+function askToken(origin) {
+  if (pendingAuth && pendingAuth.origin === origin) return pendingAuth.promise;
+  const promise = new Promise((resolve) => {
+    const modal = document.getElementById("auth-modal");
+    if (!modal) return resolve("");
+    const input = document.getElementById("auth-token-input");
+    const submit = document.getElementById("auth-submit");
+    const cancel = document.getElementById("auth-cancel");
+    document.getElementById("auth-origin").textContent = origin;
+    input.value = "";
+    modal.classList.remove("hidden");
+    input.focus();
+    const finish = (value) => {
+      modal.classList.add("hidden");
+      submit.onclick = cancel.onclick = input.onkeydown = null;
+      resolve(value);
+    };
+    submit.onclick = () => finish(input.value.trim());
+    cancel.onclick = () => finish("");
+    input.onkeydown = (e) => {
+      if (e.key === "Enter") finish(input.value.trim());
+      if (e.key === "Escape") finish("");
+    };
+  });
+  pendingAuth = { origin, promise };
+  promise.finally(() => {
+    pendingAuth = null;
+  });
+  return promise;
+}
+
+// Every /api request carries "Authorization: Bearer <token>" for its device.
+window.fetch = async function (input, init = {}) {
+  const raw = typeof input === "string" ? input : input.url;
+  let url;
+  try {
+    url = new URL(raw, window.location.href);
+  } catch (e) {
+    return nativeFetch(input, init);
+  }
+  if (!url.pathname.startsWith("/api/")) return nativeFetch(input, init);
+
+  // While the token dialog is open, pollers must not pile up behind it (their own
+  // timeouts would just fire): answer them with a local 401 straight away.
+  if (pendingAuth && pendingAuth.origin === url.origin) {
+    return new Response(JSON.stringify({ success: false, error: "authentication required" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  const { noPrompt, ...rest } = init;
+  const send = () => {
+    const headers = new Headers(rest.headers || {});
+    const token = getToken(url.origin);
+    if (token) headers.set("Authorization", "Bearer " + token);
+    return nativeFetch(input, { ...rest, headers });
+  };
+  let response = await send();
+  if (response.status === 401 && !noPrompt && Date.now() >= (authDeniedUntil[url.origin] || 0)) {
+    saveToken(url.origin, "");
+    const token = await askToken(url.origin);
+    if (token) {
+      saveToken(url.origin, token);
+      response = await send();
+      if (response.status === 401) saveToken(url.origin, "");
+    } else {
+      authDeniedUntil[url.origin] = Date.now() + 60000;
+    }
+  }
+  return response;
+};
+
+// Text from the server, uploads or the device list must never become markup.
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  })[c]);
+}
+
+// Show only the controls this device can honour (it reports them in /api/status).
+function applyCapabilities(caps) {
+  if (!caps) return;
+  deviceCaps = caps;
+  document.body.classList.toggle("cap-no-transport", caps.transport_controls === false);
+  document.body.classList.toggle("cap-single", caps.dual_output === false);
+  const hint = document.getElementById("upload-hint");
+  if (hint && caps.allowed_extensions) {
+    const formats = caps.allowed_extensions.map((e) => e.slice(1).toUpperCase()).join(", ");
+    const codecs = (caps.allowed_codecs || []).map((c) => c.toUpperCase()).join("/");
+    hint.textContent = `Format: ${formats} · codec ${codecs} · maks ${caps.max_upload_mb} MB`;
+  }
+}
+
+// <img> cannot send the token header, so previews are fetched and shown as blobs.
+const previewUrls = {};
+async function loadPreview(screen, quiet) {
+  const img = document.getElementById(`s${screen}-preview`);
+  if (!img) return;
+  try {
+    const res = await fetch(getApiUrl(`/api/screenshot?screen=${screen}&t=${Date.now()}`), {
+      noPrompt: quiet,
+    });
+    if (!res.ok) throw new Error(String(res.status));
+    const blob = await res.blob();
+    const next = URL.createObjectURL(blob);
+    const old = previewUrls[screen];
+    previewUrls[screen] = next;
+    img.src = next;
+    img.style.opacity = "1";
+    if (old) setTimeout(() => URL.revokeObjectURL(old), 1000);
+  } catch (e) {
+    img.style.opacity = "1";
+    img.src = "placeholder.jpg";
+  }
+}
+
+// Row action buttons carry data-action/data-id/data-filename instead of inline JS.
+function setupDelegatedActions() {
+  const bind = (id, handlers) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener("click", (e) => {
+      const target = e.target.closest("[data-action]");
+      if (!target || !el.contains(target)) return;
+      const handler = handlers[target.dataset.action];
+      if (handler) handler(target.dataset);
+    });
+  };
+  bind("media-library-items", {
+    "toggle-clip-mute": (d) => toggleClipMuteGlobal(d.filename),
+    "delete-file": (d) => deleteVideoFileGlobal(d.filename),
+  });
+  bind("device-table-body", { "delete-device": (d) => deleteRegisteredDevice(d.id) });
+  bind("schedule-table-body", {
+    "toggle-schedule": (d) => window.toggleScheduleStatus(d.id),
+    "delete-schedule": (d) => window.deleteSchedule(d.id),
+  });
+}
+
+
 const i18n = {
   id: {
     brand_name: "caPiBarra",
@@ -51,7 +230,9 @@ const i18n = {
     cpu_percent_label: "Penggunaan CPU",
     ram_label: "RAM Terpakai",
     disk_label: "Ruang Disk",
-    device_model: "Model: Raspberry Pi 4 Model B",
+    device_model: "Model",
+    auth_required: "Perlu token akses",
+    this_device: "Perangkat ini",
     manage_pi: "Kelola Daftar Perangkat Pi",
     new_device_name_label: "Nama Perangkat:",
     new_device_ip_label: "Alamat IP / Domain:",
@@ -66,7 +247,7 @@ const i18n = {
     about_sub:
       "Informasi detail mengenai perangkat lunak kontrol pemutar video piEdge",
     about_desc_1:
-      "<strong>piEdge CMS Signage</strong> adalah sistem manajemen konten (CMS) signage multimedia berbasis web yang dikembangkan khusus untuk mengelola pemutaran video secara mandiri maupun terpusat pada Raspberry Pi 4.",
+      "<strong>piEdge CMS Signage</strong> adalah sistem manajemen konten (CMS) signage multimedia berbasis web yang dikembangkan khusus untuk mengelola pemutaran video secara mandiri maupun terpusat pada Raspberry Pi.",
     about_desc_2:
       "Software ini mengintegrasikan server web multi-thread berdaya rendah dengan antarmuka pemrograman video MPV melalui soket IPC Unix, memungkinkan kontrol pemutaran video berkinerja tinggi langsung to port hardware HDMI (HDMI-A-1 dan HDMI-A-2) secara mulus, efisien, dan tanpa hambatan.",
 
@@ -247,7 +428,9 @@ const i18n = {
     cpu_percent_label: "CPU Usage",
     ram_label: "RAM Used",
     disk_label: "Disk Space",
-    device_model: "Model: Raspberry Pi 4 Model B",
+    device_model: "Model",
+    auth_required: "Access token required",
+    this_device: "This device",
     manage_pi: "Manage Pi Device List",
     new_device_name_label: "Device Name:",
     new_device_ip_label: "IP Address / Domain:",
@@ -262,7 +445,7 @@ const i18n = {
     about_sub:
       "Detailed information about the piEdge video player control software",
     about_desc_1:
-      "<strong>piEdge CMS Signage</strong> is a web-based multimedia signage content management system (CMS) specifically developed to manage video playback independently or centrally on Raspberry Pi 4.",
+      "<strong>piEdge CMS Signage</strong> is a web-based multimedia signage content management system (CMS) specifically developed to manage video playback independently or centrally on Raspberry Pi.",
     about_desc_2:
       "This software integrates a low-power multi-threaded web server with the MPV video programming interface via Unix IPC sockets, enabling high-performance video playback control directly to the hardware HDMI ports (HDMI-A-1 and HDMI-A-2) seamlessly, efficiently, and without lag.",
 
@@ -473,6 +656,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupTabNavigation();
   setupUploadZone();
   setupSettingsForm();
+  setupDelegatedActions();
 
   document.getElementById("btn-refresh").addEventListener("click", () => {
     showToast(t("toast_refreshing", "Menyegarkan data..."));
@@ -504,7 +688,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (devices.length > 0) {
       // Default to local IP if available, or first device
       const defaultDev =
-        devices.find((d) => d.id === "pi-1-local") || devices[0];
+        devices.find((d) => d.id === LOCAL_DEVICE_ID) || devices[0];
       selectDevice(defaultDev.id);
     }
     startPollers();
@@ -596,6 +780,18 @@ async function loadDevices() {
     localStorage.setItem("museum_signage_devices", JSON.stringify(devices));
   }
 
+  // Always offer "this device" (the Pi that serves this page) and make it the default,
+  // so the UI never opens pointed at some other Pi from the fleet list.
+  const hostPort = Number(window.location.port) || (window.location.protocol === "https:" ? 443 : 80);
+  if (!devices.some((d) => d.id === LOCAL_DEVICE_ID)) {
+    devices.unshift({
+      id: LOCAL_DEVICE_ID,
+      name: t("this_device", "Perangkat ini"),
+      ip: window.location.hostname,
+      port: hostPort,
+    });
+  }
+
   renderDeviceSwitcher();
   renderDeviceTable();
 }
@@ -650,14 +846,16 @@ function getApiUrl(endpoint) {
 }
 
 // Toast Notifications
-function showToast(message, isError = false) {
+let toastTimer = null;
+function showToast(message, isError = false, duration = 3000) {
   toastEl.textContent = message;
   toastEl.className = `toast ${isError ? "btn-danger" : ""}`;
   toastEl.classList.remove("hidden");
 
-  setTimeout(() => {
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
     toastEl.classList.add("hidden");
-  }, 3000);
+  }, duration);
 }
 
 // Polling setup
@@ -757,17 +955,25 @@ async function applyOutputMode() {
 }
 
 // Fetch active device details
+let lastPlaylistSync = 0;
+
 async function fetchActiveDeviceStatus() {
   const dev = getActiveDevice();
-  if (!dev) return;
+  if (!dev || document.hidden) return;
 
   try {
     const url = getApiUrl("/api/status");
     const res = await fetch(url, { signal: AbortSignal.timeout(2000) });
+    if (res.status === 401) {
+      const err = new Error("unauthorized");
+      err.unauthorized = true;
+      throw err;
+    }
     if (!res.ok) throw new Error("Server error");
 
     const data = await res.json();
     window.lastFetchedStatus = data;
+    applyCapabilities(data.capabilities);
 
     // Update status header
     globalStatusDot.className = "dot online";
@@ -795,12 +1001,17 @@ async function fetchActiveDeviceStatus() {
       syncPlaylistCompositionUI(allFiles);
     }
 
-    // Fetch playlists/schedules to sync assignments
-    fetchPlaylistsAndSchedulesQuietly();
+    // Fetch playlists/schedules to sync assignments (not on every 2.5 s status poll)
+    if (Date.now() - lastPlaylistSync > 10000) {
+      lastPlaylistSync = Date.now();
+      fetchPlaylistsAndSchedulesQuietly();
+    }
   } catch (e) {
     console.error("Gagal kontak ke device active status:", e);
     globalStatusDot.className = "dot offline";
-    globalStatusText.textContent = `${t("status_offline", "Offline")} (${t("connection_lost", "Connection Lost")})`;
+    globalStatusText.textContent = e.unauthorized
+      ? t("auth_required", "Perlu token akses")
+      : `${t("status_offline", "Offline")} (${t("connection_lost", "Connection Lost")})`;
 
     // Mark screens as offline
     document.getElementById("s1-status-badge").className = "badge badge-error";
@@ -884,6 +1095,8 @@ function updateScreenControlUI(screenNum, data, audioData) {
 
 // Update diagnostics values
 function updateDiagnosticsUI(sys) {
+  const modelEl = document.getElementById("diag-model");
+  if (modelEl) modelEl.textContent = sys.model || "-";
   document.getElementById("diag-temp").textContent = `${sys.cpu_temp}°C`;
   const tempBar = document.getElementById("diag-temp-bar");
   tempBar.style.width = `${Math.min(sys.cpu_temp, 100)}%`;
@@ -914,17 +1127,13 @@ function refreshScreenshots() {
   const activeTab = document
     .querySelector(".nav-btn.active")
     .getAttribute("data-tab");
-  if (activeTab !== "control") return;
+  if (activeTab !== "control" || document.hidden) return;
 
   const dev = getActiveDevice();
   if (!dev || globalStatusDot.classList.contains("offline")) return;
 
-  const s1Img = document.getElementById("s1-preview");
-  const s2Img = document.getElementById("s2-preview");
-
-  const cacheBuster = `t=${Date.now()}`;
-  s1Img.src = getApiUrl(`/api/screenshot?screen=1&${cacheBuster}`);
-  s2Img.src = getApiUrl(`/api/screenshot?screen=2&${cacheBuster}`);
+  loadPreview(1, true);
+  if (!document.body.classList.contains("cap-single")) loadPreview(2, true);
 }
 
 // Manual Refresh for a single screen preview
@@ -942,15 +1151,8 @@ function refreshSingleScreenshot(screen) {
   }
 
   const sImg = document.getElementById(`s${screen}-preview`);
-  const cacheBuster = `t=${Date.now()}`;
-
-  // Set a loading indicator or class if desired
-  sImg.style.opacity = "0.7";
-  sImg.src = getApiUrl(`/api/screenshot?screen=${screen}&${cacheBuster}`);
-
-  sImg.onload = () => {
-    sImg.style.opacity = "1";
-  };
+  if (sImg) sImg.style.opacity = "0.7";
+  loadPreview(screen, false);
 
   showToast(
     t(
@@ -1011,7 +1213,7 @@ async function updateOverviewGrid() {
   const promises = devices.map(async (device) => {
     const url = `http://${device.ip}:${device.port}/api/status`;
     try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(1800) });
+      const res = await fetch(url, { signal: AbortSignal.timeout(1800), noPrompt: true });
       if (!res.ok) throw new Error();
       const data = await res.json();
       return { device, online: true, data };
@@ -1051,21 +1253,21 @@ async function updateOverviewGrid() {
 
     card.innerHTML = `
             <div class="grid-card-header">
-                <h3>${res.device.name}</h3>
+                <h3>${escapeHtml(res.device.name)}</h3>
                 <span class="badge badge-${res.online ? "success" : "error"}">${statusText}</span>
             </div>
             <div class="grid-card-status">
                 <div class="screen-row ${res.online && res.data.screen1.service_active ? "active" : ""}">
                     <span>Layar 1:</span>
-                    <span>${screen1Name}</span>
+                    <span>${escapeHtml(screen1Name)}</span>
                 </div>
                 <div class="screen-row ${res.online && res.data.screen2.service_active ? "active" : ""}">
                     <span>Layar 2:</span>
-                    <span>${screen2Name}</span>
+                    <span>${escapeHtml(screen2Name)}</span>
                 </div>
             </div>
             <div class="grid-card-footer">
-                <span>${res.device.ip}</span>
+                <span>${escapeHtml(res.device.ip)}</span>
                 <span>${res.online ? `${cpuText} | ${tempText}` : "Tidak Terjangkau"}</span>
             </div>
         `;
@@ -1116,14 +1318,14 @@ function updateMediaLibraryUI(allFiles, playlist1, playlist2) {
             <div style="display: flex; align-items: center; gap: 12px; max-width: 75%;">
                 <div class="item-info" style="max-width: 100%;">
                     <div class="item-header-row" style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
-                        <span class="item-name" style="max-width: 300px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600;" title="${fname}">${fname}</span>
-                        <span class="${muteBadgeClass}" onclick="toggleClipMuteGlobal('${fname}')" style="cursor: pointer; font-size: 10px; padding: 2px 6px;" title="${t("opt_audio_on", "Klik untuk ubah status suara")}">${muteBadgeText}</span>
+                        <span class="item-name" style="max-width: 300px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600;" title="${escapeHtml(fname)}">${escapeHtml(fname)}</span>
+                        <span class="${muteBadgeClass}" data-action="toggle-clip-mute" data-filename="${escapeHtml(fname)}" style="cursor: pointer; font-size: 10px; padding: 2px 6px;" title="${t("opt_audio_on", "Klik untuk ubah status suara")}">${muteBadgeText}</span>
                     </div>
                     <span class="item-size" style="font-size: 11px; color: var(--text-muted);">${sizeMb ? sizeMb + " MB" : ""}</span>
                 </div>
             </div>
             <div class="item-actions">
-                <button class="btn btn-sm btn-danger" onclick="deleteVideoFileGlobal('${fname}')" title="Hapus Permanen">🗑️</button>
+                <button class="btn btn-sm btn-danger" data-action="delete-file" data-filename="${escapeHtml(fname)}" title="Hapus Permanen">🗑️</button>
             </div>
         `;
     listEl.appendChild(li);
@@ -1254,8 +1456,33 @@ function setupUploadZone() {
     }
   });
 
-  function handleFileUpload(file) {
+  async function handleFileUpload(file) {
+    const caps = deviceCaps || {};
+    const extension = "." + (file.name.split(".").pop() || "").toLowerCase();
+    if (caps.allowed_extensions && !caps.allowed_extensions.includes(extension)) {
+      showToast(
+        `Tipe file tidak didukung (${extension}). Gunakan: ${caps.allowed_extensions.join(", ")}`,
+        true,
+        7000,
+      );
+      return;
+    }
+    if (caps.max_upload_mb && file.size > caps.max_upload_mb * 1024 * 1024) {
+      showToast(`File terlalu besar (maks ${caps.max_upload_mb} MB)`, true, 7000);
+      return;
+    }
+
     const url = getApiUrl(`/api/upload`);
+    const origin = new URL(url, window.location.href).origin;
+
+    // XHR cannot use the fetch wrapper: make sure a token exists first.
+    if (!getToken(origin)) {
+      const probe = await fetch(getApiUrl("/api/status"));
+      if (probe.status === 401) {
+        showToast(t("auth_required", "Perlu token akses"), true);
+        return;
+      }
+    }
 
     const xhr = new XMLHttpRequest();
     const formData = new FormData();
@@ -1282,7 +1509,18 @@ function setupUploadZone() {
           fetchActiveDeviceStatus();
         });
       } else {
-        showToast(t("toast_upload_fail", "Gagal mengunggah file!"), true);
+        let reason = "";
+        try {
+          reason = JSON.parse(xhr.responseText).error || "";
+        } catch (e) {
+          /* not JSON */
+        }
+        if (xhr.status === 401) saveToken(origin, "");
+        showToast(
+          reason || t("toast_upload_fail", "Gagal mengunggah file!"),
+          true,
+          reason ? 9000 : 3000,
+        );
         setTimeout(() => progressWrapper.classList.add("hidden"), 2000);
       }
     });
@@ -1296,6 +1534,8 @@ function setupUploadZone() {
     });
 
     xhr.open("POST", url, true);
+    const token = getToken(origin);
+    if (token) xhr.setRequestHeader("Authorization", "Bearer " + token);
     xhr.send(formData);
   }
 }
@@ -1336,11 +1576,11 @@ function renderDeviceTable() {
   devices.forEach((dev) => {
     const tr = document.createElement("tr");
     tr.innerHTML = `
-            <td><strong>${dev.name}</strong></td>
-            <td><code>${dev.ip}</code></td>
-            <td>${dev.port}</td>
+            <td><strong>${escapeHtml(dev.name)}</strong></td>
+            <td><code>${escapeHtml(dev.ip)}</code></td>
+            <td>${escapeHtml(dev.port)}</td>
             <td>
-                <button class="btn btn-sm btn-danger" onclick="deleteRegisteredDevice('${dev.id}')">Hapus</button>
+                <button class="btn btn-sm btn-danger" data-action="delete-device" data-id="${escapeHtml(dev.id)}">Hapus</button>
             </td>
         `;
     tbody.appendChild(tr);
@@ -1809,7 +2049,7 @@ function syncPlaylistCompositionUI(allFiles) {
             <div style="display: flex; align-items: center; gap: 12px; max-width: 65%;">
                 <input type="checkbox" class="playlist-checkbox" ${isSelected ? "checked" : ""} style="cursor:pointer;" title="Sertakan ke playlist ini">
                 <div class="item-info" style="max-width: 100%;">
-                    <span class="item-name" style="font-weight: 500; font-size: 14px;" title="${fname}">${fname}</span>
+                    <span class="item-name" style="font-weight: 500; font-size: 14px;" title="${escapeHtml(fname)}">${escapeHtml(fname)}</span>
                 </div>
             </div>
             <div class="item-actions">
@@ -1934,12 +2174,12 @@ function updateScheduleUI() {
     const statusText = ev.enabled ? "Active" : "Disabled";
 
     tr.innerHTML = `
-            <td><strong>${ev.time}</strong></td>
-            <td style="font-size: 11px;">${days}</td>
-            <td><span class="badge" style="background: rgba(255,255,255,0.1); border: 1px solid var(--border-color);">${actionStr}</span></td>
-            <td>${targetStr}</td>
-            <td><span class="badge ${statusClass}" style="cursor:pointer;" onclick="toggleScheduleStatus('${ev.id}')">${statusText}</span></td>
-            <td><button class="btn btn-sm btn-danger" onclick="deleteSchedule('${ev.id}')">Hapus</button></td>
+            <td><strong>${escapeHtml(ev.time)}</strong></td>
+            <td style="font-size: 11px;">${escapeHtml(days)}</td>
+            <td><span class="badge" style="background: rgba(255,255,255,0.1); border: 1px solid var(--border-color);">${escapeHtml(actionStr)}</span></td>
+            <td>${escapeHtml(targetStr)}</td>
+            <td><span class="badge ${statusClass}" style="cursor:pointer;" data-action="toggle-schedule" data-id="${escapeHtml(ev.id)}">${statusText}</span></td>
+            <td><button class="btn btn-sm btn-danger" data-action="delete-schedule" data-id="${escapeHtml(ev.id)}">Hapus</button></td>
         `;
     tbody.appendChild(tr);
   });
@@ -2065,6 +2305,8 @@ window.shutdownSystem = async function () {
   try {
     const res = await fetch(getApiUrl("/api/system/shutdown"), {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
     });
     if (res.ok) {
       showToast(
@@ -2100,13 +2342,13 @@ async function fetchNetworkConfig() {
 
       if (ethStatusEl && data.interfaces.eth) {
         const ethInfo = data.interfaces.eth
-          .map((i) => `${i.name}: ${i.ip} (${i.status.toUpperCase()})`)
+          .map((i) => `${escapeHtml(i.name)}: ${escapeHtml(i.ip)} (${escapeHtml(String(i.status).toUpperCase())})`)
           .join("<br>");
         ethStatusEl.innerHTML = ethInfo || "None";
       }
       if (wlanStatusEl && data.interfaces.wlan) {
         const wlanInfo = data.interfaces.wlan
-          .map((i) => `${i.name}: ${i.ip} (${i.status.toUpperCase()})`)
+          .map((i) => `${escapeHtml(i.name)}: ${escapeHtml(i.ip)} (${escapeHtml(String(i.status).toUpperCase())})`)
           .join("<br>");
         wlanStatusEl.innerHTML = wlanInfo || "None";
       }

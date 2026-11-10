@@ -62,3 +62,30 @@ ip route get 1.1.1.1
 ```
 
 Umumnya LAN adalah `eth0`/`end0`, Wi-Fi adalah `wlan0`. IP yang dipilih untuk CMS adalah IP interface yang ingin dipakai mengakses perangkat.
+
+## Keamanan dan konfigurasi CMS
+
+Sejak revisi "cms-hardening", CMS tidak lagi terbuka untuk siapa saja di jaringan.
+
+**Token akses.** Saat pertama kali jalan, server membuat token acak di `/home/pi/museum_signage/.cms_token` (mode `0600`). Baca dengan `cat /home/pi/museum_signage/.cms_token`, lalu masukkan di dialog "Token akses diperlukan" saat membuka UI. Token disimpan di browser (per perangkat). Hapus file itu dan restart `cms-signage` untuk membuat token baru. Akses API dari skrip: `curl -H "Authorization: Bearer <token>" http://IP:8080/api/status`.
+
+**`cms_config.json`** (opsional, di samping `server.py`; semua kunci boleh dihilangkan):
+
+| Kunci | Bawaan | Arti |
+|---|---|---|
+| `require_auth` | `true` | Wajib token di semua `/api/*` |
+| `allowed_origins` | `[]` | Origin dashboard lain yang boleh memanggil API ini lewat browser, mis. `["http://192.168.8.10:8080"]`. Origin halaman sendiri selalu diizinkan |
+| `legacy_players` | `false` | `true` hanya untuk pemutar lama layar1/layar2 (playlist.txt, `loadlist`, stop `layar*.service`). Pemutar Pi 5 membaca `playlists.json` sendiri, jadi biarkan `false` |
+| `max_upload_mb` | `8192` | Ukuran upload maksimum |
+| `min_free_mb` | `1024` | Sisa disk minimum setelah upload |
+| `allowed_codecs` | `["hevc"]` | Codec yang boleh diunggah (Pi 5 hanya punya decoder hardware HEVC) |
+
+**Upload.** Hanya `.mp4`, `.mkv`, `.mov`; ekstensi harus cocok dengan isi file; codec dicek dari header container (tanpa ffprobe). File H.264 ditolak dengan petunjuk konversi:
+
+```bash
+ffmpeg -i input.mp4 -c:v libx265 -preset medium -crf 20 -tag:v hvc1 -an output.mp4
+```
+
+**Berkas data** (`playlists.json`, `schedules.json`, `network_config.json`, `audio_config.json`, ...) tidak lagi disajikan lewat HTTP; hanya lewat API (dengan token). Semuanya ditulis secara atomik, jadi pemutar tidak pernah membaca berkas separuh jadi.
+
+**Hak sudo.** CMS memakai `sudo -n` untuk `systemctl start/stop/restart pi5-signage`, `ip link set`, dan `shutdown`. Pi OS memberi user `pi` sudo tanpa password penuh; untuk membatasinya, salin `cms-signage.sudoers` ke `/etc/sudoers.d/` (periksa dengan `sudo visudo -cf` dulu) dan hapus `/etc/sudoers.d/010_pi-nopasswd` hanya jika kamu yakin tidak membutuhkan sudo penuh.

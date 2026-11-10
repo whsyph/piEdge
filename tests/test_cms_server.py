@@ -240,6 +240,12 @@ class CmsServerCase(unittest.TestCase):
         self.assertEqual(self.request("GET", "/../server.py", token=False)[0], 403)
         self.assertIn(self.request("GET", "/..%2fserver.py", token=False)[0], (403, 404))
 
+    def test_static_cache_headers_and_head_probe(self):
+        _, js_headers, _ = self.request("GET", "/app.js?v=1", token=False)
+        self.assertEqual(js_headers["Cache-Control"], "no-cache")      # UI updates must be picked up
+        self.assertEqual(self.request("HEAD", "/", token=False)[0], 200)
+        self.assertEqual(self.request("HEAD", "/api/status", token=False)[0], 401)
+
     # -- upload ----------------------------------------------------------------------
     def test_upload_accepts_hevc_and_rejects_the_rest(self):
         status, _, data = self.upload("ok.mp4", HEVC_MP4)
