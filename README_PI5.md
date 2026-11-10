@@ -89,3 +89,26 @@ ffmpeg -i input.mp4 -c:v libx265 -preset medium -crf 20 -tag:v hvc1 -an output.m
 **Berkas data** (`playlists.json`, `schedules.json`, `network_config.json`, `audio_config.json`, ...) tidak lagi disajikan lewat HTTP; hanya lewat API (dengan token). Semuanya ditulis secara atomik, jadi pemutar tidak pernah membaca berkas separuh jadi.
 
 **Hak sudo.** CMS memakai `sudo -n` untuk `systemctl start/stop/restart pi5-signage`, `ip link set`, dan `shutdown`. Pi OS memberi user `pi` sudo tanpa password penuh; untuk membatasinya, salin `cms-signage.sudoers` ke `/etc/sudoers.d/` (periksa dengan `sudo visudo -cf` dulu) dan hapus `/etc/sudoers.d/010_pi-nopasswd` hanya jika kamu yakin tidak membutuhkan sudo penuh.
+
+## Pasang CMS di Pi 5 baru (`install-cms.sh`)
+
+Player (repo `capibarra-lite`) dan CMS (repo ini, branch `claude/cms-hardening`) dipasang terpisah. Urutannya:
+
+1. Di Pi baru, pasang player lebih dulu dengan `sudo python3 install-fresh.py` (lihat `MANUAL-INSTALASI.md` di branch player).
+2. Clone repo CMS dan jalankan sebagai user `pi`, bukan root:
+
+```bash
+git clone --branch claude/cms-hardening --single-branch https://github.com/whsyph/piEdge.git ~/capibarra-cms
+cd ~/capibarra-cms
+bash install-cms.sh --allow 192.168.8.0/24
+```
+
+`--allow` menentukan siapa yang boleh membuka port 8080 (IP atau CIDR, pisahkan dengan koma). Selain itu port di-drop. Skrip menolak jalan jika CMS sudah ada.
+
+Skrip menyalin CMS ke `/home/pi/museum_signage`, mengarahkan `/etc/pi5-signage.json` ke file CMS (backup dibuat), memasang service `cms-signage` dan `capibarra-firewall`, lalu mengecek bahwa CMS menjawab dan `/api/status` menolak permintaan tanpa token. Token dibuat otomatis di `/home/pi/museum_signage/.cms_token`.
+
+Update kode kemudian, tanpa menyentuh playlist, jadwal, token, atau media:
+
+```bash
+cd ~/capibarra-cms && git pull && bash install-cms.sh --update
+```
