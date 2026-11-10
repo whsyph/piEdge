@@ -172,6 +172,12 @@ function setupDelegatedActions() {
     "delete-file": (d) => deleteVideoFileGlobal(d.filename),
   });
   bind("device-table-body", { "delete-device": (d) => deleteRegisteredDevice(d.id) });
+  const composition = document.getElementById("playlist-composition-items");
+  if (composition) {
+    composition.addEventListener("change", (e) => {
+      if (e.target.classList && e.target.classList.contains("playlist-checkbox")) markPlaylistCompDirty();
+    });
+  }
   bind("schedule-table-body", {
     "toggle-schedule": (d) => window.toggleScheduleStatus(d.id),
     "delete-schedule": (d) => window.deleteSchedule(d.id),
@@ -1959,6 +1965,10 @@ function renderPlaylistsUI() {
 }
 
 function selectPlaylist(pName) {
+  if (pName !== currentSelectedPlaylist && playlistCompDirty) {
+    if (!confirm("Perubahan playlist ini belum disimpan. Buang perubahan?")) return;
+    clearPlaylistCompDirty();
+  }
   currentSelectedPlaylist = pName;
   renderPlaylistsUI();
 }
@@ -1982,6 +1992,7 @@ function deletePlaylist(pName) {
 
     if (currentSelectedPlaylist === pName) {
       currentSelectedPlaylist = "Default";
+      clearPlaylistCompDirty();
     }
 
     saveAllPlaylists();
@@ -2004,15 +2015,39 @@ function createNewPlaylistFromInput() {
   }
 
   playlistsData.playlists[name] = [];
+  clearPlaylistCompDirty();
   currentSelectedPlaylist = name;
   inputEl.value = "";
 
   saveAllPlaylists();
 }
 
+// Unsaved checkbox/order edits live only in the DOM. The status poll and the playlist
+// refresh rebuild this list from saved data, so while edits are pending the list is left alone.
+let playlistCompDirty = false;
+let playlistCompEditing = null; // playlist the pending edits belong to
+
+function markPlaylistCompDirty() {
+  playlistCompDirty = true;
+  playlistCompEditing = currentSelectedPlaylist;
+  updatePlaylistDirtyNote();
+}
+
+function clearPlaylistCompDirty() {
+  playlistCompDirty = false;
+  playlistCompEditing = null;
+  updatePlaylistDirtyNote();
+}
+
+function updatePlaylistDirtyNote() {
+  const note = document.getElementById("playlist-dirty-note");
+  if (note) note.classList.toggle("hidden", !playlistCompDirty);
+}
+
 function syncPlaylistCompositionUI(allFiles) {
   const listEl = document.getElementById("playlist-composition-items");
   if (!listEl) return;
+  if (playlistCompDirty && playlistCompEditing === currentSelectedPlaylist && listEl.children.length) return;
   listEl.innerHTML = "";
 
   if (!allFiles || allFiles.length === 0) {
@@ -2055,6 +2090,7 @@ function syncPlaylistCompositionUI(allFiles) {
         `;
     listEl.appendChild(li);
   });
+  updatePlaylistDirtyNote();
 }
 
 function movePlaylistCompItem(index, direction) {
@@ -2068,6 +2104,7 @@ function movePlaylistCompItem(index, direction) {
     listEl.insertBefore(items[index + 1], items[index]);
   }
 
+  markPlaylistCompDirty();
   setTimeout(refreshPlaylistCompOrderButtons, 50);
 }
 
@@ -2103,7 +2140,9 @@ async function savePlaylistComposition() {
 
   playlistsData.playlists[currentSelectedPlaylist] = filenames;
 
+  clearPlaylistCompDirty(); // let the refresh after a successful save rebuild the list
   const success = await saveAllPlaylists();
+  if (!success) markPlaylistCompDirty(); // keep the user's edits on screen so they can retry
 
   if (success) {
     showToast(t("toast_playlist_saved", "Playlist berhasil disimpan!"));

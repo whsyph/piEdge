@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>caPIbarra CMS</title>
     <link rel="icon" type="image/png" href="logo.png">
-    <link rel="stylesheet" href="app.css?v=schedule-windows-1">
+    <link rel="stylesheet" href="app.css?v=schedule-windows-2">
 </head>
 
 <body>
@@ -368,6 +368,7 @@
                             <div class="playlist-manager-box">
                                 <div class="playlist-header" style="justify-content: space-between; align-items: center; display: flex; margin-bottom: 12px;">
                                     <h4 id="selected-playlist-title-header">Playlist: Default</h4>
+                                    <span id="playlist-dirty-note" class="playlist-dirty-note hidden">Belum disimpan</span>
                                     <button class="btn btn-primary" onclick="savePlaylistComposition()" data-i18n="btn_save_order">💾 Simpan Playlist</button>
                                 </div>
                                 <p class="help-text" data-i18n="playlist_compose_sub">Pilih video di bawah untuk dimasukkan ke playlist, dan gunakan 🔼 / 🔽 untuk mengatur urutan putar.</p>
@@ -708,7 +709,7 @@
         </div>
     </div>
 
-    <script src="app.js?v=schedule-windows-1"></script>
+    <script src="app.js?v=schedule-windows-2"></script>
     <script src="operation-ui.js?v=2"></script>
 </body>
 

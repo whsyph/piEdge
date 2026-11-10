@@ -1893,3 +1893,5 @@ body.cap-single .screens-row { grid-template-columns: minmax(0, 560px); }
   .schedule-days th:nth-child(5), .schedule-days td:nth-child(5) { display: none; }
   .schedule-days input[type="time"] { width: 100px; }
 }
+
+.playlist-dirty-note { color: #f39c12; font-size: 12px; margin-left: auto; margin-right: 12px; }
