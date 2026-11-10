@@ -154,7 +154,7 @@ Jika rasio layar berbeda dari rasio video (misalnya layar 1920×1200 16:10 denga
 | Nilai | Hasil | Catatan |
 |---|---|---|
 | `contain` (default) | Seluruh gambar terlihat, ada bidang hitam di tepi | Perilaku lama, tidak berubah |
-| `cover` | Layar terisi penuh, proporsi terjaga | Bagian yang melebihi layar terpotong (16:9 → 16:10 memotong ±10% lebar) |
+| `cover` | Layar terisi penuh, proporsi terjaga | Bagian yang melebihi layar terpotong (16:9 → 16:10 memotong ±10% lebar). Otomatis memakai renderer `gpu-copy`, karena `dmabuf-wayland` tidak bisa memotong dan hanya meregangkan gambar |
 | `stretch` | Layar terisi penuh persis | Gambar tampak melar bila rasio berbeda |
 
 Nilai lain ditolak saat player start. Ubah file lalu `sudo systemctl restart pi5-signage`.

@@ -96,8 +96,10 @@ def profile_mpv_args(config):
     """mpv renderer flags come from the validated hardware profile (single source of truth)."""
     profile = load_profile(config.get("_profile_name", "pi5"))
     mpv = dict(profile["mpv"])
-    if config.get("renderer"):  # per-device override chosen in /etc/pi5-signage.json
-        mpv.update(profile["renderers"][config["renderer"]])
+    # "cover" must crop, which dmabuf-wayland cannot do (it stretches instead), so it implies gpu-copy.
+    renderer = config.get("renderer") or ("gpu-copy" if config.get("fit") == "cover" else None)
+    if renderer:  # per-device override chosen in /etc/pi5-signage.json
+        mpv.update(profile["renderers"][renderer])
     args = [f"--vo={mpv['vo']}"]
     if mpv.get("gpu_context"):
         args.append(f"--gpu-context={mpv['gpu_context']}")
@@ -182,7 +184,7 @@ def cms_mute(path, config):
 
 FIT_MODES = {
     "contain": [],                      # whole picture visible, black bars when the aspect ratios differ (mpv default)
-    "cover": ["--panscan=1.0"],         # fill the screen, keep proportions, crop what overflows
+    "cover": ["--panscan=1.0"],         # fill the screen, keep proportions, crop what overflows (uses gpu-copy)
     "stretch": ["--keepaspect=no"],     # fill the screen exactly, distorts when the aspect ratios differ
 }
 
