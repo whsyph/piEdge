@@ -332,7 +332,7 @@ class SignageTests(unittest.TestCase):
         states = itertools.chain(display_states, itertools.repeat(True))
         patches = [unittest.mock.patch.object(signage, name, value) for name, value in (
             ("display_ready", lambda c: next(states)), ("allowed_now", lambda c: True),
-            ("set_output", lambda *a_: True), ("playlist_files_stable", lambda c: [a]),
+            ("set_output", lambda *a_, **kw: True), ("playlist_files_stable", lambda c: [a]),
             ("play", fake_play), ("wait_or_stop", stop_when_everything_is_parked))]
         patches.append(unittest.mock.patch.object(signage.time, "sleep"))
         for p in patches:
@@ -398,6 +398,69 @@ class SignageTests(unittest.TestCase):
             fixed, sent = self._geometry(**props)
             self.assertFalse(fixed, props)
             self.assertEqual(sent, [], props)
+
+    def _run_schedule_off_with_flapping_display(self, steps=30):
+        """Schedule says off; the monitor drops its signal so the connector flaps every second."""
+        import itertools
+        import signage
+        outputs, ticks = [], []
+        flap = itertools.cycle([True, False])
+
+        def fake_sleep(seconds):
+            ticks.append(seconds)
+            if len(ticks) >= steps:
+                signage.STOP = True
+
+        patches = [unittest.mock.patch.object(signage, name, value) for name, value in (
+            ("display_ready", lambda c: next(flap)), ("allowed_now", lambda c: False),
+            ("set_output", lambda enabled, display, quiet=False: outputs.append((enabled, quiet)) or True),
+            ("play", lambda *a_: self.fail("nothing may be played while the schedule is off")))]
+        patches.append(unittest.mock.patch.object(signage.time, "sleep", fake_sleep))
+        for p in patches:
+            p.start()
+        signage.STOP = False
+        try:
+            with self.assertLogs("pi5-signage") as logs:
+                signage.LOG.info("start")
+                signage.run({"display": "HDMI-A-1", "media_dir": Path("."), "retry_seconds": 5})
+        finally:
+            signage.STOP = False
+            unittest.mock.patch.stopall()
+        return outputs, "\n".join(logs.output)
+
+    def test_a_flapping_connector_is_ignored_while_the_schedule_is_off(self):
+        outputs, log = self._run_schedule_off_with_flapping_display()
+        self.assertEqual(outputs, [(False, False)])          # output switched off once, never re-applied per flap
+        self.assertNotIn("no display attached", log)         # no warning spam
+        self.assertNotIn("connected again", log)
+
+    def test_when_playback_is_wanted_but_the_display_is_gone_the_output_is_woken_quietly(self):
+        import itertools
+        import signage
+        woke = []
+        sleeps = []
+
+        def fake_sleep(seconds):
+            sleeps.append(seconds)
+            if len(sleeps) >= 3:
+                signage.STOP = True
+
+        patches = [unittest.mock.patch.object(signage, name, value) for name, value in (
+            ("display_ready", lambda c: False), ("allowed_now", lambda c: True),
+            ("set_output", lambda enabled, display, quiet=False: woke.append((enabled, quiet)) or False))]
+        patches.append(unittest.mock.patch.object(signage.time, "sleep", fake_sleep))
+        for p in patches:
+            p.start()
+        signage.STOP = False
+        try:
+            with self.assertLogs("pi5-signage") as logs:
+                signage.LOG.info("start")
+                signage.run({"display": "HDMI-A-1", "media_dir": Path("."), "retry_seconds": 5})
+        finally:
+            signage.STOP = False
+            unittest.mock.patch.stopall()
+        self.assertEqual(woke, [(True, True)])               # one quiet "--on" attempt, throttled to every 10 s
+        self.assertEqual(sum("no display attached" in line for line in logs.output), 1)
 
     def test_cms_playlist_order_and_assignment(self):
         with tempfile.TemporaryDirectory() as temp:

@@ -461,7 +461,7 @@ def wait_or_stop(seconds, config):
         time.sleep(min(1, max(0, deadline - time.monotonic())))
 
 
-def set_output(enabled: bool, display: str):
+def set_output(enabled: bool, display: str, quiet: bool = False):
     """Toggle Wayland output via wlr-randr; best-effort, never crash signage."""
     try:
         cmd=["wlr-randr","--output",display,"--on" if enabled else "--off"]
@@ -469,7 +469,7 @@ def set_output(enabled: bool, display: str):
         env.setdefault("XDG_RUNTIME_DIR","/run/user/1000")
         env.setdefault("WAYLAND_DISPLAY","wayland-0")
         result = subprocess.run(cmd, env=env, timeout=5, capture_output=True, text=True)
-        if result.returncode:
+        if result.returncode and not quiet:
             LOG.error("Output command failed: %s", result.stderr)
         return result.returncode == 0
     except (OSError, subprocess.TimeoutExpired):
@@ -632,23 +632,33 @@ def run(config):
     next_output_try = 0.0
     failures, blocked = {}, {}
     waiting_for_display = False
+    next_wake_try = 0.0
     while not STOP:
+        wanted = allowed_now(config)
         # A TV that is off or unplugged is nobody's fault: start nothing, count no failures
         # against any clip, and resume the moment the display is back (no 10 minute penalty).
-        if not display_ready(config):
+        # Only while playback is wanted: a monitor whose output the schedule switched off drops
+        # its signal and makes the connector flap, which must not be reacted to.
+        if wanted and not display_ready(config):
             if not waiting_for_display:
                 LOG.warning("HDMI %s has no display attached; waiting for it (no clip is marked as failing)",
                             config["display"])
                 waiting_for_display = True
             failures.clear()
             blocked.clear()
+            if time.monotonic() >= next_wake_try:
+                # The schedule may have switched the output off and the monitor dropped its signal:
+                # ask the compositor to switch it on again (quietly, the output may not exist yet).
+                next_wake_try = time.monotonic() + 10
+                if set_output(True, config["display"], quiet=True):
+                    hdmi_on = True
             time.sleep(1)
             continue
         if waiting_for_display:
-            LOG.info("HDMI %s is connected again; resuming", config["display"])
             waiting_for_display = False
-            hdmi_on = None  # re-apply the output state after the hotplug
-        wanted = allowed_now(config)
+            if wanted:
+                LOG.info("HDMI %s is connected again; resuming", config["display"])
+                hdmi_on = None  # re-apply the output state after the hotplug
         # Only touch the output when its state must change; retry failures at most every 30 s.
         if hdmi_on is not wanted and time.monotonic() >= next_output_try:
             if set_output(wanted, config["display"]):
