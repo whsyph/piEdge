@@ -102,8 +102,13 @@ def media_files(directory):
     ) if directory.is_dir() else []
 
 
-def playlist_files(config):
-    """Resolve the CMS-assigned playlist while keeping paths inside media_dir."""
+def playlist_files(config, strict=False):
+    """Resolve the CMS-assigned playlist while keeping paths inside media_dir.
+
+    An unreadable playlist file returns [] normally. With strict=True it returns None
+    ("unknown") so a caller that is already playing can tell a transient read failure
+    from a really empty playlist and keep going.
+    """
     directory = config["media_dir"]
     playlist_file = config.get("playlist_file")
     if not playlist_file:
@@ -113,7 +118,12 @@ def playlist_files(config):
         screen = config.get("playlist_screen", "screen1")
         playlist_name = config.get("playlist_name") or data.get("assignments", {}).get(screen, "Default")
         names = data.get("playlists", {}).get(playlist_name, [])
-    except (OSError, json.JSONDecodeError, TypeError):
+        if not isinstance(names, list):
+            raise TypeError("playlist must be a list")
+    except (OSError, ValueError, TypeError, AttributeError):
+        if strict:
+            LOG.warning("Cannot read CMS playlist %s right now; keeping the current playback", playlist_file)
+            return None
         LOG.exception("Unable to read CMS playlist %s", playlist_file)
         return []
     resolved = []
@@ -469,7 +479,9 @@ def play(path, config, loop_playlist=None):
                     break
             if loop and time.monotonic() - last_check >= 5:
                 last_check = time.monotonic()
-                if playlist_files(config) != loop_playlist:
+                current = playlist_files(config, strict=True)
+                # None = could not read it this time (the CMS may be mid-write): not a change.
+                if current is not None and current != loop_playlist:
                     LOG.info("Playlist changed; restarting player")
                     replaced = True
                     break
@@ -484,6 +496,18 @@ def play(path, config, loop_playlist=None):
                 process.wait()
         LOG.info("mpv exited with code %s", process.returncode)
     return 0 if replaced else process.returncode
+
+
+def playlist_files_stable(config, attempts=3, delay=0.5):
+    """Re-read a few times before concluding that the playlist is empty or unreadable,
+    so a file the CMS is rewriting right now does not cost a 30 s black screen."""
+    files = playlist_files(config)
+    for _ in range(attempts - 1):
+        if files or STOP or not config.get("playlist_file"):
+            break
+        time.sleep(delay)
+        files = playlist_files(config)
+    return files
 
 
 def run(config):
@@ -501,7 +525,7 @@ def run(config):
         if not wanted:
             time.sleep(1)
             continue
-        all_files = playlist_files(config)
+        all_files = playlist_files_stable(config)
         if not all_files:
             LOG.warning("No media in %s", config["media_dir"])
             wait_or_stop(30, config)

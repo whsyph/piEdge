@@ -137,6 +137,73 @@ class SignageTests(unittest.TestCase):
             thread.join(); server.close()
         self.assertIsNone(signage.mpv_time_pos("/nonexistent/mpv.sock"))
 
+    def test_strict_playlist_read_reports_unknown_instead_of_empty(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            (folder / "a.mp4").touch()
+            playlist = folder / "playlists.json"
+            config = {"media_dir": folder, "playlist_file": str(playlist), "playlist_screen": "screen1"}
+            for broken in ("{", "[]", '{"playlists": {"Default": "a.mp4"}, "assignments": {}}'):
+                playlist.write_text(broken, encoding="utf-8")
+                with self.assertLogs("pi5-signage", "WARNING"):
+                    self.assertIsNone(playlist_files(config, strict=True), broken)
+            self.assertEqual(playlist_files(config), [])  # non-strict keeps the old behaviour
+            playlist.write_text('{"playlists": {"Default": []}, "assignments": {}}', encoding="utf-8")
+            self.assertEqual(playlist_files(config, strict=True), [])  # truly empty is not "unknown"
+
+    def test_loop_keeps_playing_when_playlist_is_unreadable_but_restarts_on_real_change(self):
+        import itertools
+        import signage
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            a, b = folder / "a.mp4", folder / "b.mp4"
+            a.touch()
+            b.touch()
+            playlist = folder / "playlists.json"
+            config = {"media_dir": folder, "playlist_file": str(playlist), "playlist_screen": "screen1",
+                      "audio": False, "audio_device": "x"}
+
+            def run_play(content):
+                playlist.write_text(content, encoding="utf-8")
+                process = unittest.mock.Mock()
+                process.poll.side_effect = itertools.chain([None] * 4, itertools.repeat(0))
+                process.returncode = 0
+                clock = itertools.count(0, 6)  # each monotonic() call is 6 s later: the 5 s check fires
+                with unittest.mock.patch.object(signage.subprocess, "Popen", return_value=process), \
+                     unittest.mock.patch.object(signage, "allowed_now", return_value=True), \
+                     unittest.mock.patch.object(signage, "mpv_time_pos", return_value=None), \
+                     unittest.mock.patch.object(signage, "command_for", return_value=["mpv"]), \
+                     unittest.mock.patch.object(signage.time, "sleep"), \
+                     unittest.mock.patch.object(signage.time, "monotonic", side_effect=lambda: next(clock)), \
+                     self.assertLogs("pi5-signage", level="INFO"):
+                    signage.LOG.info("marker")  # assertLogs needs at least one record
+                    signage.play(a, config, loop_playlist=[a])
+                return process
+
+            self.assertFalse(run_play("{").terminate.called)  # unreadable: keep playing
+            self.assertTrue(run_play('{"playlists": {"Default": ["a.mp4", "b.mp4"]}, "assignments": {}}').terminate.called)
+
+    def test_stable_read_retries_while_the_file_is_being_rewritten(self):
+        import signage
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            (folder / "a.mp4").touch()
+            playlist = folder / "playlists.json"
+            playlist.write_text("{", encoding="utf-8")
+            config = {"media_dir": folder, "playlist_file": str(playlist), "playlist_screen": "screen1"}
+            valid = '{"playlists": {"Default": ["a.mp4"]}, "assignments": {}}'
+            sleeps = []
+
+            def finish_write(delay):
+                sleeps.append(delay)
+                playlist.write_text(valid, encoding="utf-8")
+
+            with unittest.mock.patch.object(signage.time, "sleep", side_effect=finish_write), \
+                 self.assertLogs("pi5-signage", "ERROR"):
+                files = signage.playlist_files_stable(config)
+            self.assertEqual([p.name for p in files], ["a.mp4"])
+            self.assertEqual(len(sleeps), 1)
+
     def test_profile_detection_is_strict(self):
         self.assertEqual(resolve_profile_name({}, "Raspberry Pi 5 Model B Rev 1.0"), "pi5")
         with self.assertRaises(ValueError): resolve_profile_name({}, "Raspberry Pi 4 Model B Rev 1.5")
