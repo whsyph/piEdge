@@ -293,6 +293,79 @@ class SignageTests(unittest.TestCase):
                 with self.assertRaises(ValueError, msg=bad):
                     signage.load_config(path)
 
+    def test_display_ready_reads_the_kernel_connector_status(self):
+        import signage
+        config = {"display": "HDMI-A-1"}
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            with unittest.mock.patch.object(signage, "DRM_CLASS_DIR", root):
+                self.assertTrue(signage.display_ready(config))            # no such connector: cannot tell, do not block
+                (root / "card1-HDMI-A-1").mkdir()
+                (root / "card1-HDMI-A-1" / "status").write_text("disconnected\n")
+                self.assertFalse(signage.display_ready(config))
+                (root / "card1-HDMI-A-1" / "status").write_text("connected\n")
+                self.assertTrue(signage.display_ready(config))
+                (root / "card1-HDMI-A-2").mkdir()
+                (root / "card1-HDMI-A-2" / "status").write_text("connected\n")
+                (root / "card1-HDMI-A-1" / "status").write_text("disconnected\n")
+                self.assertFalse(signage.display_ready(config))           # only the configured connector counts
+
+    def _run_with_display(self, display_states, play_results):
+        """Drive signage.run() with a scripted display and scripted play() results."""
+        import itertools
+        import signage
+        a = Path("a.mp4")
+        plays = []
+
+        def fake_play(path, cfg, loop):
+            plays.append(path)
+            result = play_results[len(plays) - 1]
+            if len(plays) >= len(play_results):
+                signage.STOP = True
+            return result
+
+        def stop_when_everything_is_parked(seconds, cfg):
+            if seconds == 30:  # the "all items set aside" wait: nothing more will ever be played
+                signage.STOP = True
+
+        config = {"display": "HDMI-A-1", "media_dir": Path("."), "retry_seconds": 5}
+        states = itertools.chain(display_states, itertools.repeat(True))
+        patches = [unittest.mock.patch.object(signage, name, value) for name, value in (
+            ("display_ready", lambda c: next(states)), ("allowed_now", lambda c: True),
+            ("set_output", lambda *a_: True), ("playlist_files_stable", lambda c: [a]),
+            ("play", fake_play), ("wait_or_stop", stop_when_everything_is_parked))]
+        patches.append(unittest.mock.patch.object(signage.time, "sleep"))
+        for p in patches:
+            p.start()
+        signage.STOP = False
+        try:
+            with self.assertLogs("pi5-signage") as logs:
+                signage.LOG.info("start")
+                signage.run(config)
+        finally:
+            signage.STOP = False
+            unittest.mock.patch.stopall()
+        return plays, "\n".join(logs.output)
+
+    def test_run_waits_for_a_missing_display_instead_of_starting_mpv(self):
+        plays, log = self._run_with_display([False, False, False, True], [0])
+        self.assertEqual(len(plays), 1)                     # started once, after the display came back
+        self.assertIn("has no display attached", log)
+        self.assertIn("connected again", log)
+
+    def test_clips_are_not_set_aside_for_failures_caused_by_a_vanished_display(self):
+        # play() fails quickly every time because the display just vanished: the display check
+        # inside the failure test says "gone", then the loop waits, then it is back.
+        cycle = [True, False, False] * 6
+        plays, log = self._run_with_display(cycle, [1, 1, 1, 1])
+        self.assertEqual(len(plays), 4)                     # a 4th start happened: nothing was parked
+        self.assertNotIn("set aside", log)
+
+    def test_real_quick_failures_with_a_display_still_park_the_clip(self):
+        plays, log = self._run_with_display([], [1, 1, 1, 1])
+        self.assertEqual(len(plays), 3)                     # parked after FAIL_LIMIT; the 4th play never runs
+        self.assertIn("Setting a.mp4 aside", log)
+
     def test_cms_playlist_order_and_assignment(self):
         with tempfile.TemporaryDirectory() as temp:
             folder = Path(temp)

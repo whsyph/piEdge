@@ -554,11 +554,48 @@ def playlist_files_stable(config, attempts=3, delay=0.5):
     return files
 
 
+DRM_CLASS_DIR = Path("/sys/class/drm")
+
+
+def display_ready(config):
+    """False only when the kernel says the configured HDMI connector has no display attached.
+
+    If the connector cannot be found (other kernel naming), assume it is fine rather than
+    blocking playback.
+    """
+    statuses = list(DRM_CLASS_DIR.glob(f"card*-{config['display']}/status"))
+    if not statuses:
+        return True
+    for status in statuses:
+        try:
+            if status.read_text().strip() == "connected":
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def run(config):
     hdmi_on = None
     next_output_try = 0.0
     failures, blocked = {}, {}
+    waiting_for_display = False
     while not STOP:
+        # A TV that is off or unplugged is nobody's fault: start nothing, count no failures
+        # against any clip, and resume the moment the display is back (no 10 minute penalty).
+        if not display_ready(config):
+            if not waiting_for_display:
+                LOG.warning("HDMI %s has no display attached; waiting for it (no clip is marked as failing)",
+                            config["display"])
+                waiting_for_display = True
+            failures.clear()
+            blocked.clear()
+            time.sleep(1)
+            continue
+        if waiting_for_display:
+            LOG.info("HDMI %s is connected again; resuming", config["display"])
+            waiting_for_display = False
+            hdmi_on = None  # re-apply the output state after the hotplug
         wanted = allowed_now(config)
         # Only touch the output when its state must change; retry failures at most every 30 s.
         if hdmi_on is not wanted and time.monotonic() >= next_output_try:
@@ -588,7 +625,8 @@ def run(config):
             except OSError:
                 LOG.exception("Unable to start mpv")
                 code = 1
-            real_failure = bool(code) and not STOP and allowed_now(config)
+            # Quick exits while the display just vanished are the display's problem, not the clip's.
+            real_failure = bool(code) and not STOP and allowed_now(config) and display_ready(config)
             if real_failure:
                 LOG.warning("Playback failed for %s", path.name)
             if real_failure and time.monotonic() - started < FAST_FAIL_SECONDS:
