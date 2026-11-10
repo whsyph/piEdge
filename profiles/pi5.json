@@ -12,6 +12,15 @@
     "video_sync": "audio",
     "framedrop": "vo"
   },
+  "renderers": {
+    "gpu-copy": {
+      "vo": "gpu",
+      "gpu_context": "wayland",
+      "hwdec": "drm-copy",
+      "hwdec_extra_frames": null,
+      "note": "Hardware decode, frames shown through the GPU. Use when dmabuf-wayland freezes the HDMI picture (seen on pi-4 with a Beyond TV panel): set renderer to gpu-copy in /etc/pi5-signage.json."
+    }
+  },
   "display": {
     "default_connector": "HDMI-A-1",
     "target_resolution": "3840x2160",

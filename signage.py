@@ -65,20 +65,46 @@ def validate_profile(name, data):
         raise ValueError(f"Invalid profile schema for {name}")
     mpv = data["mpv"]
     text_keys = ("vo", "hwdec", "hwdec_codecs", "video_sync", "framedrop")
-    if not all(isinstance(mpv.get(k), str) and mpv[k] and not mpv[k].startswith("-") and "\n" not in mpv[k] for k in text_keys) \
-            or not isinstance(mpv.get("hwdec_extra_frames"), int) or isinstance(mpv["hwdec_extra_frames"], bool) \
-            or not 0 <= mpv["hwdec_extra_frames"] <= 64:
+    if not all(_plain_text(mpv.get(k)) for k in text_keys) or not _frame_count(mpv.get("hwdec_extra_frames")):
         raise ValueError(f"Invalid mpv output settings in {name}")
+    renderers = data.get("renderers", {})
+    if not isinstance(renderers, dict):
+        raise ValueError(f"Invalid renderers in {name}")
+    allowed = {"vo", "hwdec", "gpu_context", "hwdec_extra_frames", "note"}
+    for renderer, override in renderers.items():
+        valid = (
+            isinstance(override, dict)
+            and not set(override) - allowed
+            and _plain_text(override.get("vo"))
+            and _plain_text(override.get("hwdec"))
+            and ("gpu_context" not in override or _plain_text(override["gpu_context"]))
+            and (override.get("hwdec_extra_frames") is None or _frame_count(override["hwdec_extra_frames"]))
+        )
+        if not valid:
+            raise ValueError(f"Invalid renderer {renderer!r} in {name}")
+
+
+def _plain_text(value):
+    return isinstance(value, str) and bool(value) and not value.startswith("-") and "\n" not in value
+
+
+def _frame_count(value):
+    return isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 64
 
 
 def profile_mpv_args(config):
     """mpv renderer flags come from the validated hardware profile (single source of truth)."""
-    mpv = load_profile(config.get("_profile_name", "pi5"))["mpv"]
-    return [
-        f"--vo={mpv['vo']}", f"--hwdec={mpv['hwdec']}",
-        f"--hwdec-codecs={mpv['hwdec_codecs']}", f"--hwdec-extra-frames={mpv['hwdec_extra_frames']}",
-        f"--video-sync={mpv['video_sync']}", f"--framedrop={mpv['framedrop']}",
-    ]
+    profile = load_profile(config.get("_profile_name", "pi5"))
+    mpv = dict(profile["mpv"])
+    if config.get("renderer"):  # per-device override chosen in /etc/pi5-signage.json
+        mpv.update(profile["renderers"][config["renderer"]])
+    args = [f"--vo={mpv['vo']}"]
+    if mpv.get("gpu_context"):
+        args.append(f"--gpu-context={mpv['gpu_context']}")
+    args += [f"--hwdec={mpv['hwdec']}", f"--hwdec-codecs={mpv['hwdec_codecs']}"]
+    if mpv.get("hwdec_extra_frames") is not None:  # None = leave mpv's own default
+        args.append(f"--hwdec-extra-frames={mpv['hwdec_extra_frames']}")
+    return args + [f"--video-sync={mpv['video_sync']}", f"--framedrop={mpv['framedrop']}"]
 
 
 def parse_clock(value):
@@ -182,6 +208,11 @@ def load_config(path):
     profile_name = resolve_profile_name(config)
     load_profile(profile_name)
     config["_profile_name"] = profile_name
+    renderer = config.get("renderer")
+    if renderer is not None:
+        available = load_profile(profile_name).get("renderers", {})
+        if not isinstance(renderer, str) or renderer not in available:
+            raise ValueError(f"Unknown renderer {renderer!r}; available: {sorted(available)}")
     config["media_dir"] = Path(config["media_dir"])
     if not isinstance(config.get("always_on", False), bool):
         raise ValueError("always_on must be true or false")

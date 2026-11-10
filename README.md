@@ -132,3 +132,13 @@ API piEdge pada perangkat mengembalikan `eth0 = 192.168.88.145` dan `wlan0 = 192
 - [Spesifikasi decoder dan output Pi 5](https://www.raspberrypi.com/documentation/computers/processors.html)
 - [Memutar audio dan video di Raspberry Pi OS Lite](https://www.raspberrypi.com/documentation/computers/os.html#play-audio-and-video-on-raspberry-pi-os-lite)
 - [Dokumentasi mpv (opsi `--vo`, `--hwdec`, IPC)](https://mpv.io/manual/stable/)
+
+## Renderer alternatif (`gpu-copy`)
+
+Default pemutar memakai `vo=dmabuf-wayland` + `hwdec=drm`. Pada sebagian panel (terlihat di pi-4 dengan TV "Beyond TV") gambar HDMI beku meski mpv berjalan normal. Untuk perangkat seperti itu pilih renderer lain di `/etc/pi5-signage.json`:
+
+```json
+"renderer": "gpu-copy"
+```
+
+Ini tetap memakai decode hardware HEVC (`hwdec=drm-copy`), tetapi frame ditampilkan lewat GPU (`vo=gpu`, `--gpu-context=wayland`). Beban CPU sedikit lebih tinggi (±14% untuk 1080p24). 4K60 belum diverifikasi dengan renderer ini. Nilai tidak dikenal ditolak saat start, dan tanpa kunci `renderer` perilaku default tidak berubah.

@@ -237,6 +237,35 @@ class SignageTests(unittest.TestCase):
         bad = {**profile, "vo": "--evil"}
         with self.assertRaises(ValueError): signage.validate_profile("pi5", dict(load_profile("pi5"), mpv=bad))
 
+    def test_renderer_override_selects_gpu_copy_and_default_is_unchanged(self):
+        import signage
+        base = {"audio": False, "audio_device": "x"}
+        default = command_for(Path("a.mp4"), base)
+        self.assertIn("--vo=dmabuf-wayland", default)
+        self.assertIn("--hwdec=drm", default)
+        self.assertNotIn("--gpu-context=wayland", default)
+        copy = command_for(Path("a.mp4"), dict(base, renderer="gpu-copy"))
+        for flag in ("--vo=gpu", "--gpu-context=wayland", "--hwdec=drm-copy"):
+            self.assertIn(flag, copy)
+        self.assertFalse([a for a in copy if a.startswith("--hwdec-extra-frames")])  # mpv default
+        self.assertIn("--video-sync=audio", copy)
+
+    def test_unknown_or_malformed_renderer_is_rejected(self):
+        import signage
+        for bad in ("nope", 5, ["gpu-copy"]):
+            with tempfile.TemporaryDirectory() as temp:
+                path = Path(temp) / "c.json"
+                path.write_text(json.dumps({"profile": "pi5", "media_dir": temp, "always_on": True, "start": "00:00",
+                                            "end": "23:59", "display": "HDMI-A-1", "audio": False,
+                                            "audio_device": "x", "retry_seconds": 5, "renderer": bad}), encoding="utf-8")
+                with self.assertRaises(ValueError, msg=bad):
+                    signage.load_config(path)
+        profile = load_profile("pi5")
+        for override in ({"vo": "--evil", "hwdec": "drm-copy"}, {"vo": "gpu", "hwdec": "drm-copy", "extra": 1},
+                         {"vo": "gpu", "hwdec": "drm-copy", "hwdec_extra_frames": 99}):
+            with self.assertRaises(ValueError, msg=override):
+                signage.validate_profile("pi5", dict(profile, renderers={"x": override}))
+
     def test_cms_playlist_order_and_assignment(self):
         with tempfile.TemporaryDirectory() as temp:
             folder = Path(temp)
