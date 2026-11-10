@@ -20,6 +20,7 @@ EXTENSIONS = {".mp4", ".mkv", ".mov"}
 STOP = False
 IPC_SOCKET = "/run/user/1000/capibarra-mpv.sock"
 STALL_SECONDS = 30      # mpv position frozen this long => treat the player as hung
+GEOMETRY_CHECK_SECONDS = 4  # after this long, verify the video window really fills the screen
 FAST_FAIL_SECONDS = 10  # a non-zero exit sooner than this counts as a failed start
 FAIL_LIMIT = 3          # consecutive fast failures before a file is set aside
 BLOCK_SECONDS = 600     # how long a repeatedly failing file is skipped
@@ -499,6 +500,50 @@ def mpv_time_pos(sock_path=None):
     return None
 
 
+def mpv_request(command, sock_path=None):
+    """Send one IPC command to mpv; returns the reply's data, or None on any failure."""
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.settimeout(2)
+            sock.connect(sock_path or IPC_SOCKET)
+            sock.sendall(json.dumps({"command": command}).encode() + b"\n")
+            buffer = b""
+            while buffer.count(b"\n") < 8:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                buffer += chunk
+                for line in buffer.split(b"\n")[:-1]:
+                    reply = json.loads(line)
+                    if "error" in reply:  # events carry "event", the reply carries "error"
+                        return reply.get("data") if reply["error"] == "success" else None
+    except (OSError, ValueError, AttributeError):
+        pass
+    return None
+
+
+def fix_window_geometry():
+    """Re-apply fullscreen when mpv's window is not the size of the screen.
+
+    Seen on pi-2 with a 3840x2400 clip on a 1920x1200 panel: the window kept the video's
+    size, so the screen showed only its top-left quarter. Toggling fullscreen makes the
+    compositor resize it. Returns True when a correction was made.
+    """
+    values = [mpv_request(["get_property", name]) for name in
+              ("osd-width", "osd-height", "display-width", "display-height", "fullscreen")]
+    osd_w, osd_h, disp_w, disp_h, fullscreen = values
+    sizes = (osd_w, osd_h, disp_w, disp_h)
+    if fullscreen is not True or not all(isinstance(v, int) and not isinstance(v, bool) and v > 0 for v in sizes):
+        return False  # not fullscreen, or this renderer does not report its window size
+    if (osd_w, osd_h) == (disp_w, disp_h):
+        return False
+    LOG.warning("mpv window is %dx%d but the screen is %dx%d; re-applying fullscreen", osd_w, osd_h, disp_w, disp_h)
+    mpv_request(["set_property", "fullscreen", False])
+    time.sleep(1)
+    mpv_request(["set_property", "fullscreen", True])
+    return True
+
+
 def play(path, config, loop_playlist=None):
     """Play one file. With loop_playlist (the single-item list), mpv loops the
     file itself and we restart only when the playlist or schedule changes."""
@@ -506,13 +551,20 @@ def play(path, config, loop_playlist=None):
     loop = loop_playlist is not None
     process = subprocess.Popen(command_for(path, config, loop=loop), start_new_session=True)
     replaced = False
-    last_check = last_poll = last_move = time.monotonic()
+    last_check = last_poll = last_move = started_at = time.monotonic()
     last_pos = None
+    geometry_checked = False
     try:
         while process.poll() is None and not STOP:
             if not allowed_now(config):
                 break
             now = time.monotonic()
+            if not geometry_checked and now - started_at >= GEOMETRY_CHECK_SECONDS:
+                geometry_checked = True
+                try:
+                    fix_window_geometry()
+                except Exception:  # a diagnostic aid must never take playback down
+                    LOG.exception("Window geometry check failed")
             if now - last_poll >= 5:
                 last_poll = now
                 pos = mpv_time_pos()

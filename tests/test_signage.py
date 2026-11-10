@@ -366,6 +366,39 @@ class SignageTests(unittest.TestCase):
         self.assertEqual(len(plays), 3)                     # parked after FAIL_LIMIT; the 4th play never runs
         self.assertIn("Setting a.mp4 aside", log)
 
+    def _geometry(self, **props):
+        import signage
+        values = {"osd-width": 3840, "osd-height": 2400, "display-width": 1920, "display-height": 1200,
+                  "fullscreen": True}
+        values.update({k.replace("_", "-"): v for k, v in props.items()})
+        sent = []
+
+        def fake(command, sock_path=None):
+            if command[0] == "get_property":
+                return values.get(command[1])
+            sent.append(command)
+            return None
+
+        with unittest.mock.patch.object(signage, "mpv_request", fake), \
+             unittest.mock.patch.object(signage.time, "sleep"), \
+             unittest.mock.patch.object(signage, "LOG"):
+            fixed = signage.fix_window_geometry()
+        return fixed, sent
+
+    def test_oversized_window_gets_fullscreen_reapplied(self):
+        fixed, sent = self._geometry()
+        self.assertTrue(fixed)
+        self.assertEqual(sent, [["set_property", "fullscreen", False], ["set_property", "fullscreen", True]])
+
+    def test_correct_unknown_or_windowed_geometry_is_left_alone(self):
+        for props in ({"osd_width": 1920, "osd_height": 1200},          # already right
+                      {"osd_width": 0, "osd_height": 0},                  # renderer does not report it (dmabuf)
+                      {"osd_width": None},                                # mpv not answering
+                      {"fullscreen": False}):                             # deliberately windowed
+            fixed, sent = self._geometry(**props)
+            self.assertFalse(fixed, props)
+            self.assertEqual(sent, [], props)
+
     def test_cms_playlist_order_and_assignment(self):
         with tempfile.TemporaryDirectory() as temp:
             folder = Path(temp)
